@@ -1,0 +1,38 @@
+J'ai raté le 1er rendu donc voici les notes que j'ai prises de ce que le prof a dit qu'il fallait faire pour le rendu
+
+--------
+
+Etape 1: Créer une architecture de risques
+
+-> Connection à IBKR
+-> Eviter TWS, saute sans cesse
+-> Mieux vaut se connecter avec l'API sur IBKR
+
+--------
+
+Onglet 1 : Les données
+On y voit juste les données, totalement agnostique, on récupére les données sur IBKR
+Le but c'est d'exposer le plus clairement possible les données
+Il faut absolument voir :
+-> Indice : son prix spot
+    -> futurs : prix à (10 jours, 1 à 18 mois, 2ans et 3ans)
+    -> put/call : prix à -30 delta, ATM, +30 delta, Prix-implied, les greeks (traduction en €/$) pour chacune des maturités pour faire les graphs pour obtenir la nappe de volatilité en fonction de delta, volatilité, et sigma_implied
+
+-> Actions : prix spot, les actions qui constituent l'indice (tester sur eurosticxx 50 car plus facile que SnP 500)
+
+Onlget 2 : Les risques
+Dans cet onlget, on séléctionne les options et actions que l'on met dans notre porte-feuille
+On va choquer les valeurs pour voir comment va évoluer le PnL
+Avoir le backtest
+Le prof a parlé de calculer :
+S = f(r, T, So, sigma)
+et
+dS = SUM( @F@x/dx)
+
+Onlget 3: envoie des ordres
+
+--------
+
+
+
+--------

@@ -1,0 +1,28 @@
+# Monitored underlyings and option chain settings
+# Start with Eurostoxx 50 (ESTX50 / SX5E) - easier to test than S&P 500
+underlyings:
+  - symbol: "SX5E"
+    sec_type: "IND"          # Index
+    exchange: "EUREX"
+    currency: "EUR"
+    futures_exchange: "EUREX"
+    label: "Eurostoxx 50"
+
+  # Uncomment to add S&P 500 later
+  # - symbol: "SPX"
+  #   sec_type: "IND"
+  #   exchange: "CBOE"
+  #   currency: "USD"
+  #   label: "S&P 500"
+
+option_chain:
+  # Maturities to monitor (in months from today)
+  maturity_windows_months: [1, 2, 3, 6, 9, 12, 18]
+  # Delta range for option selection
+  delta_targets: [-0.30, 0.0, 0.30]  # -30Δ, ATM, +30Δ
+  min_open_interest: 10
+  max_strikes_per_expiry: 50
+
+futures:
+  # Tenors to monitor (in days/months)
+  tenors: ["10d", "1m", "2m", "3m", "6m", "9m", "12m", "18m", "24m", "36m"]

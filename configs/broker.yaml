@@ -1,0 +1,32 @@
+# IBKR Client Portal Web API (REST)
+# Docs: https://www.interactivebrokers.com/campus/ibkr-api-page/cpapi-v1/
+#
+# Setup:
+#   1. Download Client Portal Gateway from ibkr.com
+#   2. Run:  bin\run.bat root\conf.yaml   (Windows)
+#   3. Open https://localhost:5000 in browser and log in once
+#   4. Keep the gateway process running while using this project
+
+connection:
+  base_url: "https://localhost:5000/v1/api"
+  verify_ssl: false       # Gateway uses a self-signed cert — safe to disable locally
+  timeout_seconds: 10
+
+session:
+  tickle_interval_seconds: 60   # Ping the gateway to keep the session alive
+
+market_data:
+  snapshot_cadence_seconds: 5
+  # Field IDs for market data snapshots (IBKR Client Portal field codes)
+  fields:
+    last:    "31"
+    bid:     "84"
+    ask:     "85"
+    high:    "70"
+    low:     "71"
+    close:   "7284"
+    delta:   "7308"
+    gamma:   "7309"
+    vega:    "7310"
+    theta:   "7311"
+    iv:      "7636"
