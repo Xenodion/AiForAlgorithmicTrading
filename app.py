@@ -1,293 +1,392 @@
 """
-Volatility Infrastructure — Tab 1: Agnostic Market Data
-Run: .venv\\Scripts\\python app.py  then open http://localhost:8050
+Volatility Infrastructure Platform
+Run: .venv\\Scripts\\streamlit run app.py
 """
 
 import sys
-import logging
 import threading
 import time
+import logging
 from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
-from dash import Dash, dcc, html, dash_table, Input, Output, State
-import dash_bootstrap_components as dbc
+import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 
 sys.path.insert(0, str(Path(__file__).parent))
 from src.connectivity.session import IBKRClient
 from src.data.fetcher import (
     resolve_index, get_spot, get_options_table,
     get_futures_prices, resolve_components, get_component_spots,
+    get_price_history,
 )
+from src.analytics.pricer import black_scholes, greeks, scenario_grid
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger("app")
 
-# ── Connect ────────────────────────────────────────────────────────────────────
-client = IBKRClient.from_config("configs/broker.yaml")
-client.check_auth()
-INDEX      = resolve_index(client)
-COMPONENTS = resolve_components(client)
+# ── Page config ────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Volatility Infrastructure Platform",
+    layout="wide",
+    page_icon="📈",
+)
 
-# ── Background tickle ──────────────────────────────────────────────────────────
-def _tickle_loop():
-    while True:
-        time.sleep(55)
-        try:
-            client.tickle()
-        except Exception as exc:
-            logger.warning("Tickle failed (%s) — retrying reauth", exc)
+# ── Init (runs once, cached for the lifetime of the server) ───────────────────
+@st.cache_resource(show_spinner="Connecting to IBKR and resolving contracts...")
+def init():
+    client = IBKRClient.from_config("configs/broker.yaml")
+    client.check_auth()
+    index      = resolve_index(client)
+    components = resolve_components(client)
+
+    def _tickle():
+        while True:
+            time.sleep(55)
             try:
-                client.post("/iserver/reauthenticate")
+                client.tickle()
             except Exception:
-                pass
+                try:
+                    client.post("/iserver/reauthenticate")
+                except Exception:
+                    pass
 
-threading.Thread(target=_tickle_loop, daemon=True, name="tickle").start()
-logger.info("Dashboard ready — %s (conid=%s) | %d components resolved",
-            INDEX["name"], INDEX["conid"], len(COMPONENTS))
+    threading.Thread(target=_tickle, daemon=True, name="tickle").start()
+    return client, index, components
 
-# ── Dash app ───────────────────────────────────────────────────────────────────
-app = Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
-app.title = "Vol Infra — Tab 1"
 
-_TBL = dict(
-    style_table={"overflowX": "auto"},
-    style_header={"backgroundColor": "#16213e", "color": "white",
-                  "fontWeight": "bold", "textAlign": "center"},
-    style_cell={"backgroundColor": "#0f3460", "color": "white",
-                "textAlign": "center", "padding": "6px 10px",
-                "fontSize": 12, "minWidth": "60px"},
+try:
+    client, INDEX, COMPONENTS = init()
+except Exception as e:
+    st.error(f"**IBKR connection failed:** {e}")
+    st.info("Start the gateway, log in at https://localhost:5000, then refresh this page.")
+    st.stop()
+
+# ── Auto-refresh every 30 s ────────────────────────────────────────────────────
+st_autorefresh(interval=30_000, key="autorefresh")
+
+# ── Header ─────────────────────────────────────────────────────────────────────
+st.title("📈 Volatility Infrastructure Platform")
+st.caption(
+    f"**{INDEX['name']}** · conid {INDEX['conid']} · "
+    f"{len(INDEX['opt_months'])} option months · "
+    f"{len(COMPONENTS)} components resolved"
 )
 
-app.layout = dbc.Container([
+tab1, tab2, tab3 = st.tabs(["📊 Données", "⚠️ Risques", "📤 Ordres"])
 
-    dcc.Interval(id="tick", interval=30_000, n_intervals=0),
+# ══════════════════════════════════════════════════════════════════════════════
+with tab1:
 
-    # ── Header ─────────────────────────────────────────────────────────────────
-    dbc.Row(dbc.Col(html.Div([
-        html.H2(INDEX["name"], style={"display": "inline", "marginRight": 16}),
-        html.Span("Tab 1 — Agnostic Market Data",
-                  style={"color": "#aaa", "fontSize": 14, "verticalAlign": "middle"}),
-    ]), class_name="py-3")),
+    # ── Controls ───────────────────────────────────────────────────────────────
+    col_btn, col_mult = st.columns([4, 1])
+    with col_btn:
+        manual_refresh = st.button("🔄 Refresh now")
+    with col_mult:
+        notional = st.number_input("Multiplier (€)", min_value=1, value=10, step=1,
+                                   help="SX5E options: €10 per index point")
 
-    # ── Spot cards ─────────────────────────────────────────────────────────────
-    dbc.Row(id="spot-row", class_name="mb-4 g-2"),
-
-    # ── Futures curve ───────────────────────────────────────────────────────────
-    dbc.Row([
-        dbc.Col(html.H4("Futures Curve"), width=12, class_name="mb-1"),
-        dbc.Col(dbc.Spinner(html.Div(id="futures-table"), color="primary"), width=12),
-    ], class_name="mb-4"),
-
-    # ── Options chain ───────────────────────────────────────────────────────────
-    dbc.Row([
-        dbc.Col(html.H4("Options Chain  ·  -30Δ / ATM / +30Δ"), width=8, class_name="mb-1"),
-        dbc.Col([
-            dbc.InputGroup([
-                dbc.InputGroupText("Multiplier (€)"),
-                dbc.Input(id="notional", type="number", value=10, min=1, step=1,
-                          style={"maxWidth": "100px"}),
-            ], size="sm"),
-        ], width=4, class_name="mb-1 d-flex align-items-center justify-content-end"),
-        dbc.Col(dbc.Spinner(html.Div(id="options-table"), color="primary"), width=12),
-    ], class_name="mb-4"),
-
-    # ── Vol surface ─────────────────────────────────────────────────────────────
-    dbc.Row([
-        dbc.Col(html.H4("Volatility Surface"), width=12, class_name="mb-1"),
-        dbc.Col(dbc.Spinner(dcc.Graph(id="vol-surface", style={"height": "500px"}),
-                            color="primary"), width=12),
-    ], class_name="mb-4"),
-
-    # ── Component stocks ────────────────────────────────────────────────────────
-    dbc.Row([
-        dbc.Col(html.H4(f"Eurostoxx 50 Components  ({len(COMPONENTS)} resolved)"),
-                width=12, class_name="mb-1"),
-        dbc.Col(dbc.Spinner(html.Div(id="components-table"), color="primary"), width=12),
-    ]),
-
-], fluid=True)
-
-
-# ── Helpers ────────────────────────────────────────────────────────────────────
-
-def _card(label, value, color="light"):
-    if isinstance(value, float):
-        txt = f"{value:,.2f}"
-    elif value is not None:
-        txt = str(value)
-    else:
-        txt = "—"
-    return dbc.Col(dbc.Card(dbc.CardBody([
-        html.P(label, className="text-muted mb-1", style={"fontSize": 11}),
-        html.H5(txt, className=f"text-{color} mb-0", style={"fontSize": 15}),
-    ]), style={"textAlign": "center", "padding": "10px"}), xs=6, sm=4, md=2)
-
-
-def _fmt(v, decimals=2):
-    if v is None:
-        return "—"
-    return f"{v:,.{decimals}f}"
-
-
-EMPTY_FIG = go.Figure().update_layout(
-    template="plotly_dark", paper_bgcolor="#111", plot_bgcolor="#111",
-    title="No data yet — options chain loading",
-)
-
-
-# ── Callbacks ──────────────────────────────────────────────────────────────────
-
-@app.callback(Output("spot-row", "children"), Input("tick", "n_intervals"))
-def update_spot(_):
+    # ── Spot ───────────────────────────────────────────────────────────────────
+    st.subheader(f"Spot — {INDEX['name']}")
     spot = get_spot(client, INDEX["conid"])
-    return [
-        _card("Last",   spot.get("last"),  "warning"),
-        _card("High",   spot.get("high"),  "success"),
-        _card("Low",    spot.get("low"),   "danger"),
-        _card("Change", spot.get("chg"),   "info"),
-        _card("Chg %",  spot.get("chg_p"), "info"),
-        _card("Close",  spot.get("close"), "secondary"),
-    ]
 
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    def _fmt(v, decimals=2):
+        return f"{v:,.{decimals}f}" if v is not None else "—"
 
-@app.callback(Output("futures-table", "children"), Input("tick", "n_intervals"))
-def update_futures(_):
-    months = INDEX["fut_months"]
-    if not months:
-        return dbc.Alert("No futures months found.", color="warning")
+    last  = spot.get("last")
+    close = spot.get("close")
+    delta = round(last - close, 2) if last and close else None
 
-    prices = get_futures_prices(client, INDEX["conid"], months)
-    price_map = {r["Month"]: r for r in prices}
+    c1.metric("Last",  _fmt(last),             f"{delta:+,.2f}" if delta else None)
+    c2.metric("High",  _fmt(spot.get("high")))
+    c3.metric("Low",   _fmt(spot.get("low")))
+    c4.metric("Close", _fmt(close))
+    c5.metric("Chg",   _fmt(spot.get("chg")))
+    c6.metric("Chg %", f"{spot.get('chg_p'):+.2f}%" if spot.get("chg_p") else "—")
 
-    rows = []
-    for m in months[:24]:
-        p = price_map.get(m, {})
-        rows.append({
-            "Month":    m,
-            "Last":     _fmt(p.get("Last")),
-            "Bid":      _fmt(p.get("Bid")),
-            "Ask":      _fmt(p.get("Ask")),
-            "Exchange": "EUREX",
+    st.divider()
+
+    # ── 3Y Price history ───────────────────────────────────────────────────────
+    st.subheader(f"{INDEX['name']} — 3 Year Price History")
+    col_period, col_bar = st.columns([3, 1])
+    with col_period:
+        period = st.select_slider("Period", options=["6m", "1y", "2y", "3y"], value="3y")
+    with col_bar:
+        bar = st.selectbox("Bar", ["1w", "1d"], index=0)
+
+    with st.spinner("Loading history..."):
+        history = get_price_history(client, INDEX["conid"], period=period, bar=bar)
+
+    if history:
+        import pandas as pd
+        df_hist = pd.DataFrame(history)
+        fig_hist = go.Figure()
+        fig_hist.add_trace(go.Candlestick(
+            x=df_hist["date"],
+            open=df_hist["open"], high=df_hist["high"],
+            low=df_hist["low"],  close=df_hist["close"],
+            name=INDEX["name"],
+            increasing_line_color="#26a69a",
+            decreasing_line_color="#ef5350",
+        ))
+        # 50-week moving average
+        df_hist["ma50"] = df_hist["close"].rolling(50).mean()
+        fig_hist.add_trace(go.Scatter(
+            x=df_hist["date"], y=df_hist["ma50"],
+            name="50-bar MA", line=dict(color="#ff9800", width=1.5, dash="dot"),
+        ))
+        fig_hist.update_layout(
+            height=420,
+            xaxis_rangeslider_visible=False,
+            template="plotly_dark",
+            margin=dict(l=0, r=0, t=20, b=0),
+            legend=dict(orientation="h", y=1.02),
+        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+    else:
+        st.info("Historical data unavailable.")
+
+    st.divider()
+
+    # ── Futures ────────────────────────────────────────────────────────────────
+    st.subheader("Futures Curve")
+    with st.spinner("Loading futures..."):
+        fut_rows = get_futures_prices(client, INDEX["conid"], INDEX["fut_months"])
+
+    if fut_rows:
+        df_fut = pd.DataFrame(fut_rows)
+        for col in ["Last", "Bid", "Ask"]:
+            df_fut[col] = df_fut[col].apply(lambda v: f"{v:,.2f}" if v else "—")
+        st.dataframe(df_fut, use_container_width=True, hide_index=True)
+    else:
+        st.info("Futures data unavailable — retrying on next refresh.")
+
+    st.divider()
+
+    # ── Options chain ──────────────────────────────────────────────────────────
+    st.subheader("Options Chain — -30Δ / ATM / +30Δ")
+    spot_price = float(last or close or 0)
+
+    with st.spinner("Loading options (may take up to 60 s on first load)..."):
+        opt_rows = get_options_table(
+            client, INDEX["conid"], INDEX["opt_months"], spot_price
+        )
+
+    if opt_rows:
+        df_opt = pd.DataFrame(opt_rows)
+
+        # Add € columns next to each Greek
+        for greek in ["Delta", "Gamma", "Vega", "Theta"]:
+            df_opt[f"{greek} (€)"] = df_opt[greek].apply(
+                lambda v: round(v * notional, 4) if v is not None else None
+            )
+
+        col_order = [
+            "Maturity", "Strike", "Type",
+            "Bid", "Ask", "Last", "IV %",
+            "Delta", "Delta (€)",
+            "Gamma", "Gamma (€)",
+            "Vega",  "Vega (€)",
+            "Theta", "Theta (€)",
+        ]
+        st.dataframe(
+            df_opt[[c for c in col_order if c in df_opt.columns]],
+            use_container_width=True,
+            hide_index=True,
+        )
+
+        # ── Vol surface ────────────────────────────────────────────────────────
+        st.subheader("Volatility Surface")
+        surf = df_opt[df_opt["IV %"].notna() & df_opt["Strike"].notna()].copy()
+
+        if not surf.empty:
+            pivot = surf.pivot_table(
+                values="IV %", index="Strike", columns="Maturity", aggfunc="mean"
+            )
+            fig = go.Figure(go.Surface(
+                z=pivot.values,
+                x=list(pivot.columns),
+                y=list(pivot.index),
+                colorscale="Viridis",
+                colorbar=dict(title="IV %", thickness=15),
+            ))
+            fig.update_layout(
+                height=520,
+                title=f"{INDEX['name']} — Implied Volatility Surface",
+                scene=dict(
+                    xaxis_title="Maturity",
+                    yaxis_title="Strike",
+                    zaxis_title="IV (%)",
+                ),
+                margin=dict(l=0, r=0, t=40, b=0),
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Vol surface requires IV % data — loading...")
+
+    else:
+        st.info("Options chain loading — this takes ~60 s on first load.")
+
+    st.divider()
+
+    # ── Component stocks ───────────────────────────────────────────────────────
+    st.subheader(f"Eurostoxx 50 Components — {len(COMPONENTS)} stocks")
+    with st.spinner("Loading component prices..."):
+        comp_rows = get_component_spots(client, COMPONENTS)
+
+    if comp_rows:
+        df_comp = pd.DataFrame(comp_rows)
+        for col in ["Last", "Bid", "Ask"]:
+            df_comp[col] = df_comp[col].apply(lambda v: f"{v:,.2f}" if v else "—")
+        st.dataframe(df_comp, use_container_width=True, hide_index=True)
+    else:
+        st.info("Component data loading...")
+
+# ══════════════════════════════════════════════════════════════════════════════
+with tab2:
+    st.header("⚠️ Risques")
+
+    spot_now = get_spot(client, INDEX["conid"])
+    S_live   = float(spot_now.get("last") or spot_now.get("close") or 5000)
+
+    # ── Black-Scholes Pricer ───────────────────────────────────────────────────
+    st.subheader("🧮 Black-Scholes Pricer")
+    st.caption("S = f(S₀, K, T, r, σ)   |   dV ≈ Δ·dS + ½Γ·dS² + ν·dσ + θ·dt")
+
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    bs_S      = c1.number_input("Spot S₀",    value=round(S_live, 0), step=10.0)
+    bs_K      = c2.number_input("Strike K",   value=float(round(S_live / 100) * 100), step=50.0)
+    bs_T      = c3.number_input("Maturity T (yr)", value=0.25, min_value=0.01, step=0.05, format="%.2f")
+    bs_r      = c4.number_input("Rate r (%)",  value=3.0,  step=0.25, format="%.2f") / 100
+    bs_sigma  = c5.number_input("Vol σ (%)",   value=20.0, step=1.0,  format="%.1f") / 100
+    bs_mult   = c6.number_input("Multiplier",  value=10,   step=1)
+
+    col_call, col_put = st.columns(2)
+
+    for opt_type, col in [("call", col_call), ("put", col_put)]:
+        price = black_scholes(bs_S, bs_K, bs_T, bs_r, bs_sigma, opt_type)
+        g     = greeks(bs_S, bs_K, bs_T, bs_r, bs_sigma, opt_type, bs_mult)
+        col.markdown(f"**{'Call 📈' if opt_type=='call' else 'Put 📉'}**")
+        col.metric("Price", f"{price:,.4f}")
+        metrics_row = col.columns(4)
+        metrics_row[0].metric("Δ Delta",  f"{g['delta']:+.4f}",  f"€ {g['dollar_delta']:+.2f}")
+        metrics_row[1].metric("Γ Gamma",  f"{g['gamma']:.6f}",   f"€ {g['dollar_gamma']:+.2f}")
+        metrics_row[2].metric("ν Vega",   f"{g['vega']:+.4f}",   f"€ {g['dollar_vega']:+.2f}")
+        metrics_row[3].metric("θ Theta",  f"{g['theta']:+.4f}",  f"€ {g['dollar_theta']:+.2f}")
+
+    st.divider()
+
+    # ── Scenario Engine ────────────────────────────────────────────────────────
+    st.subheader("📊 Scenario Engine — PnL Grid")
+    st.caption("Full repricing vs Greeks approximation under spot × vol shocks")
+
+    scen_type = st.radio("Option type", ["call", "put"], horizontal=True)
+
+    spot_shocks = [-0.15, -0.10, -0.05, 0.0, +0.05, +0.10, +0.15]
+    vol_shocks  = [-0.10, -0.05, 0.0, +0.05, +0.10]
+
+    scenarios = scenario_grid(
+        S=bs_S, K=bs_K, T=bs_T, r=bs_r, sigma=bs_sigma,
+        option_type=scen_type, multiplier=bs_mult,
+        spot_shocks=spot_shocks, vol_shocks=vol_shocks,
+    )
+    df_scen = pd.DataFrame(scenarios)
+
+    # Pivot: rows = spot shock, columns = vol shock, values = P&L (full)
+    pivot = df_scen.pivot_table(
+        values="P&L (full)", index="Spot shock", columns="Vol shock", aggfunc="sum"
+    )
+    st.markdown("**P&L (full repricing, €)**")
+    st.dataframe(
+        pivot.style.background_gradient(cmap="RdYlGn", axis=None),
+        use_container_width=True,
+    )
+
+    st.markdown("**Full scenario table**")
+    st.dataframe(df_scen, use_container_width=True, hide_index=True)
+
+    st.divider()
+
+    # ── Portfolio Builder ──────────────────────────────────────────────────────
+    st.subheader("📋 Portfolio Builder")
+    st.caption("Add positions manually — Greeks aggregate automatically")
+
+    if "portfolio" not in st.session_state:
+        st.session_state.portfolio = []
+
+    with st.form("add_position"):
+        pc1, pc2, pc3, pc4, pc5, pc6, pc7 = st.columns(7)
+        p_label = pc1.text_input("Label",    value="ESTX50 ATM C")
+        p_type  = pc2.selectbox("Type",      ["call", "put"])
+        p_K     = pc3.number_input("Strike K",    value=float(round(S_live / 100) * 100), step=50.0)
+        p_T     = pc4.number_input("T (yr)",  value=0.25, step=0.05, format="%.2f")
+        p_sigma = pc5.number_input("σ (%)",   value=20.0, step=1.0) / 100
+        p_qty   = pc6.number_input("Qty",     value=1, step=1)
+        p_mult  = pc7.number_input("Mult",    value=10, step=1)
+        add     = st.form_submit_button("➕ Add to portfolio")
+
+    if add:
+        price = black_scholes(bs_S, p_K, p_T, bs_r, p_sigma, p_type)
+        g     = greeks(bs_S, p_K, p_T, bs_r, p_sigma, p_type, p_mult)
+        st.session_state.portfolio.append({
+            "Label":  p_label,
+            "Type":   p_type,
+            "Strike": p_K,
+            "T":      p_T,
+            "σ":      f"{p_sigma:.1%}",
+            "Qty":    p_qty,
+            "Mult":   p_mult,
+            "Price":  round(price, 4),
+            "Δ":      g["delta"],
+            "Γ":      g["gamma"],
+            "ν":      g["vega"],
+            "θ":      g["theta"],
+            "$ Δ":    g["dollar_delta"] * p_qty,
+            "$ Γ":    g["dollar_gamma"] * p_qty,
+            "$ ν":    g["dollar_vega"]  * p_qty,
+            "$ θ":    g["dollar_theta"] * p_qty,
+            "_S":     bs_S, "_K": p_K, "_T": p_T,
+            "_r":     bs_r, "_sigma": p_sigma, "_type": p_type, "_mult": p_mult,
         })
 
-    return dash_table.DataTable(
-        data=rows,
-        columns=[{"name": c, "id": c} for c in ["Month", "Last", "Bid", "Ask", "Exchange"]],
-        **_TBL, page_size=24,
-    )
+    if st.session_state.portfolio:
+        if st.button("🗑️ Clear portfolio"):
+            st.session_state.portfolio = []
+            st.rerun()
 
+        df_port = pd.DataFrame(st.session_state.portfolio)
+        display_cols = ["Label","Type","Strike","T","σ","Qty","Mult","Price",
+                        "Δ","Γ","ν","θ","$ Δ","$ Γ","$ ν","$ θ"]
+        st.dataframe(df_port[display_cols], use_container_width=True, hide_index=True)
 
-@app.callback(
-    [Output("options-table", "children"), Output("vol-surface", "figure")],
-    [Input("tick", "n_intervals"), Input("notional", "value")],
-)
-def update_options(_, notional):
-    notional = float(notional or 10)
-    spot_data = get_spot(client, INDEX["conid"])
-    spot = spot_data.get("last") or spot_data.get("close") or 0
-    months = INDEX["opt_months"]
+        # Aggregate Greeks
+        st.markdown("**Aggregated portfolio Greeks**")
+        ag1, ag2, ag3, ag4 = st.columns(4)
+        ag1.metric("Total $ Δ", f"€ {df_port['$ Δ'].sum():+,.2f}")
+        ag2.metric("Total $ Γ", f"€ {df_port['$ Γ'].sum():+,.2f}")
+        ag3.metric("Total $ ν", f"€ {df_port['$ ν'].sum():+,.2f}")
+        ag4.metric("Total $ θ", f"€ {df_port['$ θ'].sum():+,.2f}")
 
-    if not months or not spot:
-        return dbc.Alert("No option data.", color="warning"), EMPTY_FIG
+        # Portfolio PnL approximation
+        st.markdown("**Local P&L approximation** — dV ≈ Δ·dS + ½Γ·dS² + ν·dσ + θ·dt")
+        pa1, pa2, pa3 = st.columns(3)
+        dS_input     = pa1.slider("Spot move dS (pts)", -500, 500, 0, step=10)
+        dsigma_input = pa2.slider("Vol move dσ (%)",    -10,  10,  0, step=1) / 100
+        dt_input     = pa3.slider("Time dt (days)",     0,    30,  1)
 
-    rows = get_options_table(client, INDEX["conid"], months, float(spot))
-
-    if not rows:
-        return dbc.Alert("Options chain loading — retry in 30s.", color="info"), EMPTY_FIG
-
-    # Add € columns
-    for r in rows:
-        r["Delta €"]  = _fmt(r["Delta"]  * notional if r["Delta"]  is not None else None)
-        r["Gamma €"]  = _fmt(r["Gamma"]  * notional if r["Gamma"]  is not None else None)
-        r["Vega €"]   = _fmt(r["Vega"]   * notional if r["Vega"]   is not None else None)
-        r["Theta €"]  = _fmt(r["Theta"]  * notional if r["Theta"]  is not None else None)
-        # Format raw Greeks for display
-        r["Delta"]    = _fmt(r["Delta"],  4)
-        r["Gamma"]    = _fmt(r["Gamma"],  6)
-        r["Vega"]     = _fmt(r["Vega"],   4)
-        r["Theta"]    = _fmt(r["Theta"],  4)
-        r["IV %"]     = _fmt(r["IV %"],   2)
-        r["Bid"]      = _fmt(r["Bid"])
-        r["Ask"]      = _fmt(r["Ask"])
-        r["Last"]     = _fmt(r["Last"])
-
-    cols = ["Maturity", "Strike", "Type",
-            "Bid", "Ask", "Last", "IV %",
-            "Delta", "Delta €", "Gamma", "Gamma €",
-            "Vega", "Vega €", "Theta", "Theta €"]
-
-    table = dash_table.DataTable(
-        data=rows,
-        columns=[{"name": c, "id": c} for c in cols],
-        sort_action="native",
-        filter_action="native",
-        page_size=20,
-        **_TBL,
-        style_data_conditional=[
-            {"if": {"filter_query": '{Type} contains "call"'},
-             "backgroundColor": "#0d2137", "color": "#64b5f6"},
-            {"if": {"filter_query": '{Type} contains "put"'},
-             "backgroundColor": "#1a0d0d", "color": "#ef9a9a"},
-        ],
-    )
-
-    # Vol surface — IV% by Maturity × Strike
-    df = pd.DataFrame(rows)
-    df["IV_num"] = pd.to_numeric(df["IV %"].replace("—", None), errors="coerce")
-    df["Strike_num"] = pd.to_numeric(df["Strike"], errors="coerce")
-    surface_df = df[df["IV_num"].notna() & df["Strike_num"].notna()]
-
-    if surface_df.empty:
-        fig = EMPTY_FIG
+        total_pnl = sum(
+            (row["Δ"] * dS_input
+             + 0.5 * row["Γ"] * dS_input**2
+             + row["ν"] * dsigma_input * 100
+             + row["θ"] * dt_input) * row["Qty"] * row["Mult"]
+            for row in st.session_state.portfolio
+        )
+        st.metric("Estimated portfolio P&L", f"€ {total_pnl:+,.2f}")
     else:
-        pivot = surface_df.pivot_table(
-            values="IV_num", index="Strike_num", columns="Maturity", aggfunc="mean"
-        )
-        fig = go.Figure(go.Surface(
-            z=pivot.values,
-            x=list(pivot.columns),
-            y=list(pivot.index),
-            colorscale="Viridis",
-            colorbar=dict(title="IV %", thickness=15),
-        ))
-        fig.update_layout(
-            template="plotly_dark", paper_bgcolor="#111",
-            title=f"{INDEX['name']} — Implied Volatility Surface",
-            scene=dict(
-                xaxis_title="Maturity", yaxis_title="Strike", zaxis_title="IV (%)",
-                bgcolor="#111",
-            ),
-            margin=dict(l=0, r=0, t=40, b=0),
-        )
+        st.info("Add positions above to build your portfolio.")
 
-    return table, fig
-
-
-@app.callback(Output("components-table", "children"), Input("tick", "n_intervals"))
-def update_components(_):
-    if not COMPONENTS:
-        return dbc.Alert("No components resolved.", color="warning")
-
-    rows = get_component_spots(client, COMPONENTS)
-    if not rows:
-        return dbc.Alert("Component data loading...", color="info")
-
-    for r in rows:
-        r["Last"] = _fmt(r.get("Last"))
-        r["Bid"]  = _fmt(r.get("Bid"))
-        r["Ask"]  = _fmt(r.get("Ask"))
-
-    return dash_table.DataTable(
-        data=rows,
-        columns=[{"name": c, "id": c} for c in ["Symbol", "Name", "Last", "Bid", "Ask"]],
-        sort_action="native",
-        filter_action="native",
-        page_size=25,
-        **_TBL,
-    )
-
-
-if __name__ == "__main__":
-    app.run(debug=True, port=8050)
+# ══════════════════════════════════════════════════════════════════════════════
+with tab3:
+    st.header("📤 Ordres")
+    st.info("Coming soon — order entry via IBKR Client Portal API.")

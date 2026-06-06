@@ -3,7 +3,7 @@
 ## Every time you want to work
 
 ### Step 1 — Start the IBKR Gateway
-Open a CMD window (not Git Bash) and run:
+Open a **CMD** window (not PowerShell, not Git Bash) and run:
 ```
 cd C:\ibkr-gateway
 bin\run.bat root\conf.yaml
@@ -22,19 +22,34 @@ Open your browser and go to: **https://localhost:5000**
 - Wait for "Client login succeeds"
 
 ### Step 3 — Run the dashboard
-Open a Git Bash terminal in the project folder and run:
-```bash
-.venv/Scripts/python app.py
+Open a **PowerShell** terminal in the project folder and run:
+```powershell
+.venv/Scripts/streamlit run app.py
 ```
 
 ### Step 4 — Open the dashboard
-Go to: **http://localhost:8050**
+Streamlit opens it automatically. If not, go to: **http://localhost:8501**
 
 ---
 
 ## Notes
 - The gateway CMD window (Step 1) must stay open the whole time
-- The Git Bash terminal (Step 3) must stay open the whole time
-- The session stays alive automatically — no need to re-login while the app is running
-- IBKR paper trading is **offline on weekends** — work Monday to Friday only
+- The PowerShell terminal (Step 3) must stay open the whole time
+- The session stays alive automatically (background keepalive every 55s) — no need to re-login while the app is running
+- IBKR paper trading is **offline on weekends** — options chain and futures will be empty Saturday/Sunday, this is normal
 - If you get a 401 error, your session expired — go back to Step 2 and log in again
+- Futures prices and options chain only populate on weekdays (EUREX hours)
+
+---
+
+## First-time setup (once only)
+```powershell
+python -m venv .venv
+.venv/Scripts/pip install -r requirements.txt
+```
+
+If you add a new dependency:
+```powershell
+.venv/Scripts/pip install <package>
+.venv/Scripts/pip freeze > requirements.txt
+```

@@ -9,7 +9,8 @@ from src.connectivity.session import IBKRClient
 
 logger = logging.getLogger(__name__)
 
-SPOT_FIELDS   = ["31", "84", "85", "70", "71", "7284"]
+SPOT_FIELDS   = ["31", "84", "85", "70", "71", "82", "83"]
+#                last  bid   ask   high  low   chg   chg%
 OPTION_FIELDS = ["31", "84", "85", "7308", "7309", "7310", "7311", "7636"]
 #                last  bid   ask   delta  gamma  vega   theta  IV%
 
@@ -157,9 +158,9 @@ def get_spot(client: IBKRClient, conid: int) -> dict:
         snaps = client.snapshot([conid], SPOT_FIELDS)
         snap  = snaps[0] if isinstance(snaps, list) and snaps else {}
         last  = _num(snap.get("31"))
-        close = _num(snap.get("7284"))
-        chg   = round(last - close, 2)      if last and close else None
-        chg_p = round(chg / close * 100, 2) if chg  and close else None
+        chg   = _num(snap.get("82"))
+        chg_p = _num(snap.get("83"))
+        close = round(last - chg, 2) if last is not None and chg is not None else None
         return {
             "last":  last,
             "bid":   _num(snap.get("84")),
@@ -175,18 +176,68 @@ def get_spot(client: IBKRClient, conid: int) -> dict:
         return {}
 
 
+# ── Historical price data ──────────────────────────────────────────────────────
+
+def get_price_history(client: IBKRClient, conid: int,
+                      period: str = "3y", bar: str = "1w") -> list[dict]:
+    """
+    Fetch OHLCV history from IBKR.
+    period: '3y', '1y', '6m', etc.
+    bar:    '1w', '1d', '1h', etc.
+    Returns list of { date, open, high, low, close }.
+    """
+    try:
+        r = client.get("/iserver/marketdata/history", params={
+            "conid": conid, "period": period, "bar": bar, "outsideRth": "false",
+        })
+        rows = []
+        for d in r.get("data", []):
+            import datetime
+            ts = datetime.datetime.utcfromtimestamp(d["t"] / 1000)
+            rows.append({
+                "date":  ts,
+                "open":  d.get("o"),
+                "high":  d.get("h"),
+                "low":   d.get("l"),
+                "close": d.get("c"),
+            })
+        return rows
+    except Exception as exc:
+        logger.error("get_price_history: %s", exc)
+        return []
+
+
 # ── Futures curve ──────────────────────────────────────────────────────────────
+
+def _resolve_futures_root(client: IBKRClient) -> int | None:
+    """Find the ESTX50 futures root conid by searching with secType=FUT."""
+    for sym in ("ESTX50", "SX5E", "STOXX50E"):
+        try:
+            results = client.post("/iserver/secdef/search", json={
+                "symbol": sym, "secType": "FUT", "name": False,
+            })
+            if isinstance(results, list) and results:
+                conid = results[0].get("conid")
+                if conid:
+                    logger.info("Futures root: %s → conid=%s", sym, conid)
+                    return int(conid)
+        except Exception as exc:
+            logger.debug("futures root %s: %s", sym, exc)
+    return None
+
 
 def get_futures_prices(client: IBKRClient, base_conid: int, fut_months: list[str]) -> list[dict]:
     """
     Resolve individual monthly futures conids via /iserver/secdef/info then snapshot them.
+    Tries the futures root conid first; falls back to index conid.
     Returns list of { Month, Last, Bid, Ask }.
     """
+    fut_root = _resolve_futures_root(client) or base_conid
     rows = []
     for month in fut_months[:24]:
         try:
             info = client.get("/iserver/secdef/info", params={
-                "conid": base_conid, "sectype": "FUT", "month": month,
+                "conid": fut_root, "sectype": "FUT", "month": month,
             })
             if not (isinstance(info, list) and info):
                 continue
@@ -278,14 +329,17 @@ def get_component_spots(client: IBKRClient, components: dict[str, dict]) -> list
 
 def get_strikes(client: IBKRClient, conid: int, month: str) -> list[float]:
     """Return sorted list of available strikes for a given YYYYMM month."""
-    try:
-        result = client.get("/iserver/secdef/strikes", params={
-            "conid": conid, "sectype": "OPT", "month": month, "exchange": "",
-        })
-        if isinstance(result, dict):
-            return sorted(set(result.get("call", []) + result.get("put", [])))
-    except Exception as exc:
-        logger.warning("get_strikes %s: %s", month, exc)
+    for exchange in ("EUREX", ""):
+        try:
+            result = client.get("/iserver/secdef/strikes", params={
+                "conid": conid, "sectype": "OPT", "month": month, "exchange": exchange,
+            })
+            if isinstance(result, dict):
+                strikes = sorted(set(result.get("call", []) + result.get("put", [])))
+                if strikes:
+                    return strikes
+        except Exception as exc:
+            logger.warning("get_strikes %s exchange=%s: %s", month, exchange, exc)
     return []
 
 
