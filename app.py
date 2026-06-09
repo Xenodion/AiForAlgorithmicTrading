@@ -7,6 +7,7 @@ import sys
 import threading
 import time
 import logging
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -19,11 +20,53 @@ from src.connectivity.session import IBKRClient
 from src.data.fetcher import (
     resolve_index, get_spot, get_options_table,
     get_futures_prices, resolve_components, get_component_spots,
-    get_price_history,
+    get_price_history, get_strikes, get_option_conid,
 )
-from src.analytics.pricer import black_scholes, greeks, scenario_grid
+from src.analytics.pricer import black_scholes, greeks, scenario_grid, implied_volatility
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+
+def _maturity_years(month: str) -> float:
+    year = int(str(month)[:4])
+    month_num = int(str(month)[4:6])
+    if month_num == 12:
+        expiry = date(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        expiry = date(year, month_num + 1, 1) - timedelta(days=1)
+    return max((expiry - date.today()).days / 365.0, 1 / 365.0)
+
+
+def _option_price(row: pd.Series) -> float | None:
+    bid, ask, last = row.get("Bid"), row.get("Ask"), row.get("Last")
+    if bid is not None and ask is not None and bid > 0 and ask > 0:
+        return (bid + ask) / 2.0
+    if last is not None and last > 0:
+        return last
+    return None
+
+
+def fill_missing_iv(df: pd.DataFrame, spot: float, rate: float = 0.03) -> pd.DataFrame:
+    df = df.copy()
+    if "IV Source" not in df.columns:
+        df["IV Source"] = df["IV %"].apply(lambda v: "IBKR" if pd.notna(v) else None)
+
+    for idx, row in df[df["IV %"].isna()].iterrows():
+        price = _option_price(row)
+        option_type = "put" if "put" in str(row.get("Type", "")).lower() else "call"
+        iv = implied_volatility(
+            price=price,
+            S=spot,
+            K=float(row["Strike"]),
+            T=_maturity_years(row["Maturity"]),
+            r=rate,
+            option_type=option_type,
+        ) if price else None
+        if iv is not None:
+            df.at[idx, "IV %"] = round(iv * 100, 4)
+            df.at[idx, "IV Source"] = "BS fallback"
+
+    return df
 
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -73,7 +116,9 @@ st.caption(
     f"{len(COMPONENTS)} components resolved"
 )
 
-tab1, tab2, tab3 = st.tabs(["📊 Données", "⚠️ Risques", "📤 Ordres"])
+tab1, tab2, tab3, tab4 = st.tabs(
+    ["📊 Données", "⚠️ Risques", "📤 Ordres", "🌀 Surface"]
+)
 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab1:
@@ -175,6 +220,9 @@ with tab1:
 
     if opt_rows:
         df_opt = pd.DataFrame(opt_rows)
+        df_opt = fill_missing_iv(df_opt, spot_price)
+
+        st.session_state["df_options"] = df_opt
 
         # Add € columns next to each Greek
         for greek in ["Delta", "Gamma", "Vega", "Theta"]:
@@ -184,7 +232,7 @@ with tab1:
 
         col_order = [
             "Maturity", "Strike", "Type",
-            "Bid", "Ask", "Last", "IV %",
+            "Bid", "Ask", "Last", "IV %", "IV Source",
             "Delta", "Delta (€)",
             "Gamma", "Gamma (€)",
             "Vega",  "Vega (€)",
@@ -388,5 +436,411 @@ with tab2:
 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
-    st.header("📤 Ordres")
-    st.info("Coming soon — order entry via IBKR Client Portal API.")
+
+    st.header("📤 Trading & Execution")
+
+    # Account Overview
+    st.subheader("💰 Account Overview")
+
+    col1, col2, col3, col4 = st.columns(4)
+
+    col1.metric("Net Liquidation", "€ --")
+    col2.metric("Buying Power", "€ --")
+    col3.metric("Cash", "€ --")
+    col4.metric("Margin Used", "€ --")
+
+    st.divider()
+
+    # Order Entry
+    st.subheader("📝 Order Entry")
+
+    c1, c2, c3, c4 = st.columns(4)
+
+    symbol = c1.selectbox(
+        "Underlying",
+        [INDEX["symbol"]] if "symbol" in INDEX else [INDEX["name"]]
+    )
+
+    side = c2.selectbox(
+        "Side",
+        ["BUY", "SELL"]
+    )
+
+    qty = c3.number_input(
+        "Quantity",
+        min_value=1,
+        value=1
+    )
+
+    order_type = c4.selectbox(
+        "Order Type",
+        ["MARKET", "LIMIT"]
+    )
+
+    limit_price = None
+
+    if order_type == "LIMIT":
+        limit_price = st.number_input(
+            "Limit Price",
+            value=float(S_live)
+        )
+
+    if st.button("🚀 Send Order"):
+        st.warning("Order routing not connected yet.")
+
+    st.divider()
+
+    # Open Orders
+    st.subheader("📋 Open Orders")
+
+    open_orders = pd.DataFrame(
+        columns=[
+            "Order ID",
+            "Symbol",
+            "Side",
+            "Qty",
+            "Type",
+            "Status"
+        ]
+    )
+
+    st.dataframe(
+        open_orders,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.divider()
+
+    # Positions
+    st.subheader("📊 Positions")
+
+    positions = pd.DataFrame(
+        columns=[
+            "Symbol",
+            "Qty",
+            "Avg Price",
+            "Market Price",
+            "PnL"
+        ]
+    )
+
+    st.dataframe(
+        positions,
+        use_container_width=True,
+        hide_index=True
+    )
+
+    st.divider()
+
+    # Risk Preview
+    st.subheader("⚠️ Pre-Trade Risk")
+
+    risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
+
+    risk_col1.metric("Projected Δ", "0.00")
+    risk_col2.metric("Projected Γ", "0.00")
+    risk_col3.metric("Projected ν", "0.00")
+    risk_col4.metric("Projected θ", "0.00")
+
+    # ══════════════════════════════════════════════════════════════════════════════
+with tab4:
+
+    st.header("🌀 Volatility Surface Analytics")
+
+    if "df_options" not in st.session_state:
+        spot_now = get_spot(client, INDEX["conid"])
+        surface_spot = float(
+            spot_now.get("last")
+            or spot_now.get("close")
+            or 5000
+        )
+
+        with st.spinner("Loading option chain for surface analytics..."):
+            opt_rows = get_options_table(
+                client, INDEX["conid"], INDEX["opt_months"], surface_spot
+            )
+
+        if opt_rows:
+            st.session_state["df_options"] = fill_missing_iv(
+                pd.DataFrame(opt_rows), surface_spot
+            )
+
+    if "df_options" not in st.session_state:
+        st.warning(
+            "Option chain still unavailable. Wait a few seconds, then refresh."
+        )
+        st.caption(
+            f"Debug: spot={surface_spot:,.2f}, "
+            f"option months={len(INDEX['opt_months'])}"
+        )
+        diag_rows = []
+        for month in INDEX["opt_months"][:3]:
+            strikes = get_strikes(client, INDEX["conid"], month)
+            atm_strike = min(strikes, key=lambda k: abs(k - surface_spot)) if strikes else None
+            call_conid = (
+                get_option_conid(client, INDEX["conid"], month, atm_strike, "C")
+                if atm_strike else None
+            )
+            put_conid = (
+                get_option_conid(client, INDEX["conid"], month, atm_strike, "P")
+                if atm_strike else None
+            )
+            diag_rows.append({
+                "Maturity": month,
+                "Strikes": len(strikes),
+                "ATM Strike": atm_strike,
+                "ATM Call conid": call_conid,
+                "ATM Put conid": put_conid,
+            })
+
+        with st.expander("Option chain diagnostics"):
+            st.dataframe(pd.DataFrame(diag_rows), use_container_width=True, hide_index=True)
+    else:
+
+        spot_now = get_spot(client, INDEX["conid"])
+        surface_spot = float(
+            spot_now.get("last")
+            or spot_now.get("close")
+            or 5000
+        )
+
+        df_surface = fill_missing_iv(
+            st.session_state["df_options"], surface_spot
+        )
+        st.session_state["df_options"] = df_surface.copy()
+
+        df_surface = df_surface[
+            df_surface["IV %"].notna()
+        ].copy()
+
+        if df_surface.empty:
+            st.warning("No IV data available.")
+            priced_rows = st.session_state["df_options"].apply(
+                lambda row: _option_price(row) is not None, axis=1
+            ).sum()
+            st.caption(
+                f"Rows loaded={len(st.session_state['df_options'])}, "
+                f"rows with usable option price={priced_rows}. "
+                "If usable prices are 0, IBKR is not returning option market data."
+            )
+
+        else:
+
+            # --------------------------------------------------
+            # 3D Volatility Surface
+            # --------------------------------------------------
+
+            st.subheader("🌀 3D Volatility Surface")
+
+            maturities = sorted(
+                df_surface["Maturity"].dropna().unique()
+            )
+
+            surface_points = df_surface[
+                df_surface["Strike"].notna() & df_surface["IV %"].notna()
+            ].copy()
+
+            if (
+                surface_points["Maturity"].nunique() >= 2
+                and surface_points["Strike"].nunique() >= 2
+            ):
+                pivot_surface = surface_points.pivot_table(
+                    values="IV %",
+                    index="Strike",
+                    columns="Maturity",
+                    aggfunc="mean",
+                )
+                fig_surface = go.Figure(
+                    go.Surface(
+                        z=pivot_surface.values,
+                        x=list(pivot_surface.columns),
+                        y=list(pivot_surface.index),
+                        colorscale="Viridis",
+                        colorbar=dict(title="IV %", thickness=15),
+                        hovertemplate=(
+                            "Maturity=%{x}<br>"
+                            "Strike=%{y}<br>"
+                            "IV=%{z:.2f}%<extra></extra>"
+                        ),
+                    )
+                )
+            else:
+                fig_surface = go.Figure(
+                    go.Scatter3d(
+                        x=surface_points["Maturity"],
+                        y=surface_points["Strike"],
+                        z=surface_points["IV %"],
+                        mode="markers",
+                        marker=dict(
+                            size=5,
+                            color=surface_points["IV %"],
+                            colorscale="Viridis",
+                            colorbar=dict(title="IV %", thickness=15),
+                        ),
+                        hovertemplate=(
+                            "Maturity=%{x}<br>"
+                            "Strike=%{y}<br>"
+                            "IV=%{z:.2f}%<extra></extra>"
+                        ),
+                    )
+                )
+
+            fig_surface.update_layout(
+                height=620,
+                template="plotly_dark",
+                title=f"{INDEX['name']} — Implied Volatility Surface",
+                scene=dict(
+                    xaxis_title="Maturity",
+                    yaxis_title="Strike",
+                    zaxis_title="IV (%)",
+                    camera=dict(eye=dict(x=1.6, y=1.6, z=0.9)),
+                ),
+                margin=dict(l=0, r=0, t=45, b=0),
+            )
+
+            st.plotly_chart(fig_surface, use_container_width=True)
+
+            st.divider()
+
+            # --------------------------------------------------
+            # Volatility Smile
+            # --------------------------------------------------
+
+            st.subheader("📈 Volatility Smile")
+
+            selected_mat = st.selectbox(
+                "Select Maturity",
+                maturities
+            )
+
+            smile = (
+                df_surface[
+                    df_surface["Maturity"] == selected_mat
+                ]
+                .sort_values("Strike")
+            )
+
+            fig_smile = go.Figure()
+
+            fig_smile.add_trace(
+                go.Scatter(
+                    x=smile["Strike"],
+                    y=smile["IV %"],
+                    mode="lines+markers",
+                    name="IV Smile"
+                )
+            )
+
+            fig_smile.update_layout(
+                height=450,
+                xaxis_title="Strike",
+                yaxis_title="Implied Volatility (%)",
+                template="plotly_dark"
+            )
+
+            st.plotly_chart(
+                fig_smile,
+                use_container_width=True
+            )
+
+            st.divider()
+
+            # --------------------------------------------------
+            # ATM Term Structure
+            # --------------------------------------------------
+
+            st.subheader("⏳ ATM Term Structure")
+
+            atm_points = []
+
+            for maturity in maturities:
+
+                temp = df_surface[
+                    df_surface["Maturity"] == maturity
+                ]
+
+                if temp.empty:
+                    continue
+
+                idx = (
+                    temp["Strike"] - surface_spot
+                ).abs().idxmin()
+
+                atm_row = temp.loc[idx]
+
+                atm_points.append({
+                    "Maturity": maturity,
+                    "ATM IV": atm_row["IV %"]
+                })
+
+            df_term = pd.DataFrame(atm_points)
+
+            if not df_term.empty:
+
+                fig_term = go.Figure()
+
+                fig_term.add_trace(
+                    go.Scatter(
+                        x=df_term["Maturity"],
+                        y=df_term["ATM IV"],
+                        mode="lines+markers",
+                        name="ATM IV"
+                    )
+                )
+
+                fig_term.update_layout(
+                    height=450,
+                    xaxis_title="Maturity",
+                    yaxis_title="ATM IV (%)",
+                    template="plotly_dark"
+                )
+
+                st.plotly_chart(
+                    fig_term,
+                    use_container_width=True
+                )
+
+            st.divider()
+
+            # --------------------------------------------------
+            # Surface Statistics
+            # --------------------------------------------------
+
+            st.subheader("📊 Surface Statistics")
+
+            c1, c2, c3, c4 = st.columns(4)
+
+            c1.metric(
+                "Quotes",
+                len(df_surface)
+            )
+
+            c2.metric(
+                "Maturities",
+                df_surface["Maturity"].nunique()
+            )
+
+            c3.metric(
+                "Average IV",
+                f"{df_surface['IV %'].mean():.2f}%"
+            )
+
+            c4.metric(
+                "Max IV",
+                f"{df_surface['IV %'].max():.2f}%"
+            )
+
+            st.dataframe(
+                df_surface[
+                    [
+                        "Maturity",
+                        "Strike",
+                        "Type",
+                        "IV %",
+                        "IV Source",
+                    ]
+                ],
+                use_container_width=True,
+                hide_index=True
+            )

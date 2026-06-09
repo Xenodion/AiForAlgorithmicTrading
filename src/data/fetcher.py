@@ -345,17 +345,22 @@ def get_strikes(client: IBKRClient, conid: int, month: str) -> list[float]:
 
 def get_option_conid(client: IBKRClient, conid: int, month: str, strike: float, right: str) -> int | None:
     """Resolve a single option contract conid via /iserver/secdef/info."""
-    try:
-        result = client.get("/iserver/secdef/info", params={
-            "conid": conid, "sectype": "OPT",
-            "month": month, "strike": strike, "right": right,
-        })
-        if isinstance(result, list) and result:
-            return result[0].get("conid")
-        if isinstance(result, dict):
-            return result.get("conid")
-    except Exception as exc:
-        logger.debug("get_option_conid %s %s %s: %s", month, strike, right, exc)
+    for exchange in ("EUREX", ""):
+        try:
+            result = client.get("/iserver/secdef/info", params={
+                "conid": conid, "sectype": "OPT",
+                "month": month, "strike": strike, "right": right,
+                "exchange": exchange,
+            })
+            if isinstance(result, list) and result:
+                return result[0].get("conid")
+            if isinstance(result, dict):
+                return result.get("conid")
+        except Exception as exc:
+            logger.debug(
+                "get_option_conid %s %s %s exchange=%s: %s",
+                month, strike, right, exchange, exc
+            )
     return None
 
 
