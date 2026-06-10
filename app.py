@@ -62,8 +62,8 @@ except Exception as e:
     st.info("Start the gateway, log in at https://localhost:5000, then refresh this page.")
     st.stop()
 
-# ── Auto-refresh every 30 s ────────────────────────────────────────────────────
-st_autorefresh(interval=30_000, key="autorefresh")
+# ── Auto-refresh every 10 min ──────────────────────────────────────────────────
+st_autorefresh(interval=10 * 60_000, key="autorefresh")
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.title("📈 Volatility Infrastructure Platform")
