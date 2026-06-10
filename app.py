@@ -27,6 +27,11 @@ from src.analytics.pricer import black_scholes, greeks, scenario_grid, implied_v
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 
+def _month_label(month: str) -> str:
+    """'202609' -> 'Sep26'."""
+    return date(int(month[:4]), int(month[4:6]), 1).strftime("%b%y")
+
+
 def _maturity_years(month: str) -> float:
     year = int(str(month)[:4])
     month_num = int(str(month)[4:6])
@@ -44,6 +49,12 @@ def _option_price(row: pd.Series) -> float | None:
     if last is not None and last > 0:
         return last
     return None
+
+
+def explain(text: str) -> None:
+    """Collapsible beginner-friendly explanation shown under a section title."""
+    with st.expander("ℹ️ What is this?"):
+        st.markdown(text)
 
 
 def fill_missing_iv(df: pd.DataFrame, spot: float, rate: float = 0.03) -> pd.DataFrame:
@@ -105,8 +116,8 @@ except Exception as e:
     st.info("Start the gateway, log in at https://localhost:5000, then refresh this page.")
     st.stop()
 
-# ── Auto-refresh every 30 s ────────────────────────────────────────────────────
-st_autorefresh(interval=30_000, key="autorefresh")
+# ── Auto-refresh every 10 min ──────────────────────────────────────────────────
+st_autorefresh(interval=10 * 60_000, key="autorefresh")
 
 # ── Header ─────────────────────────────────────────────────────────────────────
 st.title("📈 Volatility Infrastructure Platform")
@@ -133,6 +144,17 @@ with tab1:
 
     # ── Spot ───────────────────────────────────────────────────────────────────
     st.subheader(f"Spot — {INDEX['name']}")
+    explain(
+        f"The live level of the **{INDEX['name']}** index, in **index points** "
+        "(not €) — it's a weighted average of the 50 component stock prices, "
+        "not a directly tradeable price.\n\n"
+        "- **Last**: most recent quoted level\n"
+        "- **High / Low**: today's range\n"
+        "- **Close**: previous session's closing level\n"
+        "- **Chg / Chg %**: change vs previous close\n\n"
+        "Index points only become a € amount once you trade a derivative "
+        "(future/option) — see the **Multiplier** field above."
+    )
     spot = get_spot(client, INDEX["conid"])
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -154,6 +176,16 @@ with tab1:
 
     # ── 3Y Price history ───────────────────────────────────────────────────────
     st.subheader(f"{INDEX['name']} — 3 Year Price History")
+    explain(
+        "A **candlestick chart** of the index level over time.\n\n"
+        "- Each candle shows the **Open / High / Low / Close** for one bar "
+        "(one week or one day, depending on the **Bar** setting)\n"
+        "- Green = price went up over the bar, red = price went down\n"
+        "- The dotted orange line is the **50-bar moving average** — a smoothed "
+        "trend line, useful to see if the index is currently above or below "
+        "its recent average level\n\n"
+        "Use **Period** to control how far back the chart goes."
+    )
     col_period, col_bar = st.columns([3, 1])
     with col_period:
         period = st.select_slider("Period", options=["6m", "1y", "2y", "3y"], value="3y")
@@ -196,14 +228,41 @@ with tab1:
 
     # ── Futures ────────────────────────────────────────────────────────────────
     st.subheader("Futures Curve")
+    explain(
+        "The **futures curve** (a.k.a. term structure): the price of "
+        "**futures contracts** on the index across expiry months "
+        "(e.g. JUN26, SEP26...), each worth "
+        f"**{notional}€ per index point** (see the Multiplier setting above).\n\n"
+        "- **Last**: most recent traded price\n"
+        "- **Bid / Ask**: prices people are currently willing to trade at — "
+        "often missing for far-dated contracts, since they trade rarely and "
+        "have no live quote, only a last traded price\n\n"
+        "An upward-sloping curve (further expiries priced higher) is called "
+        "**contango**; a downward-sloping curve is **backwardation**."
+    )
     with st.spinner("Loading futures..."):
         fut_rows = get_futures_prices(client, INDEX["conid"], INDEX["fut_months"])
 
     if fut_rows:
         df_fut = pd.DataFrame(fut_rows)
-        for col in ["Last", "Bid", "Ask"]:
-            df_fut[col] = df_fut[col].apply(lambda v: f"{v:,.2f}" if v else "—")
-        st.dataframe(df_fut, use_container_width=True, hide_index=True)
+        df_fut["Label"] = df_fut["Month"].apply(_month_label)
+
+        fig_fut = go.Figure()
+        for col, color in [("Bid", "#66bb6a"), ("Last", "#42a5f5"), ("Ask", "#ef5350")]:
+            fig_fut.add_trace(go.Scatter(
+                x=df_fut["Label"], y=df_fut[col], name=col,
+                mode="lines+markers", line=dict(width=2, color=color),
+                marker=dict(size=6), connectgaps=False,
+            ))
+        fig_fut.update_layout(
+            height=380,
+            template="plotly_dark",
+            margin=dict(l=0, r=0, t=20, b=0),
+            legend=dict(orientation="h", y=1.02),
+            xaxis_title="Expiry month",
+            yaxis_title="Index points",
+        )
+        st.plotly_chart(fig_fut, use_container_width=True)
     else:
         st.info("Futures data unavailable — retrying on next refresh.")
 
@@ -211,6 +270,23 @@ with tab1:
 
     # ── Options chain ──────────────────────────────────────────────────────────
     st.subheader("Options Chain — -30Δ / ATM / +30Δ")
+    explain(
+        "A snapshot of **option contracts** on the index for several "
+        "maturities, approximated around three strikes per expiry: a "
+        "put around **-30Δ** (out-of-the-money put), the **ATM** (at-the-money, "
+        "strike ≈ current spot), and a call around **+30Δ** "
+        "(out-of-the-money call) — picked here as roughly ±10% from spot.\n\n"
+        "- **Bid / Ask / Last**: option prices in index points\n"
+        "- **IV %**: implied volatility — the market's expectation of future "
+        "price swings, derived from the option's price\n"
+        "- **IV Source**: `IBKR` if IBKR returned the IV directly, or "
+        "`BS fallback` if it was backed out locally with the Black-Scholes "
+        "formula because IBKR didn't provide one\n"
+        "- **Greeks (Δ, Γ, ν, θ)**: sensitivities of the option price to "
+        "spot, and their **(€)** counterparts converted using the "
+        "Multiplier above — e.g. Delta (€) ≈ how many € the position gains "
+        "per 1-point move in the index"
+    )
     spot_price = float(last or close or 0)
 
     with st.spinner("Loading options (may take up to 60 s on first load)..."):
@@ -246,6 +322,14 @@ with tab1:
 
         # ── Vol surface ────────────────────────────────────────────────────────
         st.subheader("Volatility Surface")
+        explain(
+            "A 3D view of **implied volatility (IV %)** across **Strike** and "
+            "**Maturity**, built from the options chain above.\n\n"
+            "Normally IV isn't flat — it forms a 'smile' or 'skew' shape across "
+            "strikes, and a 'term structure' shape across maturities. This "
+            "surface lets you see both at once. For a more detailed version "
+            "with smile and term-structure charts, see the **Surface** tab."
+        )
         surf = df_opt[df_opt["IV %"].notna() & df_opt["Strike"].notna()].copy()
 
         if not surf.empty:
@@ -280,6 +364,13 @@ with tab1:
 
     # ── Component stocks ───────────────────────────────────────────────────────
     st.subheader(f"Eurostoxx 50 Components — {len(COMPONENTS)} stocks")
+    explain(
+        f"Live prices for the **{len(COMPONENTS)} individual stocks** that "
+        f"make up the {INDEX['name']} index (e.g. LVMH, SAP, TotalEnergies...). "
+        "The index level is essentially a weighted average of these stock "
+        "prices, so this table shows what's actually moving the index "
+        "underneath the hood."
+    )
     with st.spinner("Loading component prices..."):
         comp_rows = get_component_spots(client, COMPONENTS)
 
@@ -294,12 +385,36 @@ with tab1:
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.header("⚠️ Risques")
+    explain(
+        "This tab is a **risk and pricing toolbox**, independent of live "
+        "market data — you choose all the inputs yourself.\n\n"
+        "- **Black-Scholes Pricer**: price a single option and see its Greeks\n"
+        "- **Scenario Engine**: see how an option's P&L would change under "
+        "different spot/volatility moves\n"
+        "- **Portfolio Builder**: combine several option positions and see "
+        "their combined (aggregated) Greeks and an estimated P&L"
+    )
 
     spot_now = get_spot(client, INDEX["conid"])
     S_live   = float(spot_now.get("last") or spot_now.get("close") or 5000)
 
     # ── Black-Scholes Pricer ───────────────────────────────────────────────────
     st.subheader("🧮 Black-Scholes Pricer")
+    explain(
+        "Computes a theoretical option price using the **Black-Scholes "
+        "formula**, from 5 inputs:\n\n"
+        "- **S₀**: spot price of the underlying today\n"
+        "- **K**: strike price of the option\n"
+        "- **T**: time to maturity, in years (e.g. 0.25 ≈ 3 months)\n"
+        "- **r**: risk-free interest rate\n"
+        "- **σ (sigma)**: volatility — how much the underlying is expected "
+        "to move\n\n"
+        "The **Greeks** measure sensitivity: **Δ (Delta)** = price change per "
+        "1-point spot move, **Γ (Gamma)** = how Delta itself changes, "
+        "**ν (Vega)** = price change per 1% change in volatility, "
+        "**θ (Theta)** = price change per day (time decay). The **(€)** "
+        "values convert these into euros using the **Multiplier**."
+    )
     st.caption("S = f(S₀, K, T, r, σ)   |   dV ≈ Δ·dS + ½Γ·dS² + ν·dσ + θ·dt")
 
     c1, c2, c3, c4, c5, c6 = st.columns(6)
@@ -327,6 +442,20 @@ with tab2:
 
     # ── Scenario Engine ────────────────────────────────────────────────────────
     st.subheader("📊 Scenario Engine — PnL Grid")
+    explain(
+        "Takes the option defined above (S₀, K, T, r, σ) and asks: "
+        "**'what if the spot price and volatility change?'**\n\n"
+        "- Each row/column combination is a **scenario**: spot moves by the "
+        "'Spot shock' % and volatility moves by the 'Vol shock' %\n"
+        "- **P&L (full)**: re-runs Black-Scholes with the shocked S and σ, "
+        "then compares to the original price — the *exact* P&L\n"
+        "- **P&L (Greeks)**: estimates the same P&L using only the "
+        "Greeks (Δ, Γ, ν) — a fast linear/quadratic approximation\n"
+        "- **Error**: the difference between the two — shows how good the "
+        "Greeks approximation is, especially for larger moves\n\n"
+        "The colored grid is the full-repricing P&L: green = gains, "
+        "red = losses, in €."
+    )
     st.caption("Full repricing vs Greeks approximation under spot × vol shocks")
 
     scen_type = st.radio("Option type", ["call", "put"], horizontal=True)
@@ -358,6 +487,21 @@ with tab2:
 
     # ── Portfolio Builder ──────────────────────────────────────────────────────
     st.subheader("📋 Portfolio Builder")
+    explain(
+        "Build a small **portfolio of option positions** by hand and see "
+        "how their risk adds up.\n\n"
+        "- Fill in the form (type, strike, maturity, vol, quantity, "
+        "multiplier) and click **➕ Add to portfolio** — each click adds one "
+        "position to the table below\n"
+        "- **Aggregated portfolio Greeks**: the sum of every position's € "
+        "Greeks — this tells you the portfolio's overall sensitivity to "
+        "spot (Δ), to changes in Δ itself (Γ), to volatility (ν), and to "
+        "time passing (θ)\n"
+        "- **Local P&L approximation**: drag the sliders to simulate a move "
+        "in spot, volatility, or time, and see the estimated impact on the "
+        "whole portfolio's value (using the Greeks, not full repricing)\n\n"
+        "Use **🗑️ Clear portfolio** to start over."
+    )
     st.caption("Add positions manually — Greeks aggregate automatically")
 
     if "portfolio" not in st.session_state:
@@ -438,9 +582,25 @@ with tab2:
 with tab3:
 
     st.header("📤 Trading & Execution")
+    explain(
+        "This tab is a **mock-up of an order ticket and account view** — "
+        "the layout is in place, but it is **not yet connected** to IBKR's "
+        "order routing or account endpoints, so all values shown here are "
+        "placeholders (`--`, `0.00`, empty tables). Sending an order will "
+        "currently just show a warning instead of placing a real trade."
+    )
 
     # Account Overview
     st.subheader("💰 Account Overview")
+    explain(
+        "Will eventually show your **live IBKR account balances**:\n\n"
+        "- **Net Liquidation**: total account value (cash + positions)\n"
+        "- **Buying Power**: how much you could still spend/trade\n"
+        "- **Cash**: uninvested cash balance\n"
+        "- **Margin Used**: how much of your buying power is currently "
+        "tied up as collateral for open positions\n\n"
+        "Currently shows `--` placeholders — not yet wired to IBKR."
+    )
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -453,6 +613,18 @@ with tab3:
 
     # Order Entry
     st.subheader("📝 Order Entry")
+    explain(
+        "A form to define an order, in the same shape a real broker ticket "
+        "would use:\n\n"
+        "- **Underlying**: which instrument to trade\n"
+        "- **Side**: BUY or SELL\n"
+        "- **Quantity**: number of contracts/shares\n"
+        "- **Order Type**: MARKET (execute immediately at the current price) "
+        "or LIMIT (only execute at your chosen price or better)\n"
+        "- **Limit Price**: only shown for LIMIT orders\n\n"
+        "Clicking **🚀 Send Order** does **not** place a real order yet — it "
+        "just shows a warning, since order routing isn't connected."
+    )
 
     c1, c2, c3, c4 = st.columns(4)
 
@@ -492,6 +664,14 @@ with tab3:
 
     # Open Orders
     st.subheader("📋 Open Orders")
+    explain(
+        "Will list any **orders you've placed that haven't fully executed "
+        "yet** — e.g. a LIMIT order still waiting for the price to be "
+        "reached. Each row would show the order ID, symbol, side, "
+        "quantity, type, and current status (e.g. Submitted, Filled, "
+        "Cancelled).\n\n"
+        "Currently empty — not yet wired to IBKR."
+    )
 
     open_orders = pd.DataFrame(
         columns=[
@@ -514,6 +694,13 @@ with tab3:
 
     # Positions
     st.subheader("📊 Positions")
+    explain(
+        "Will list everything you currently **hold in your account** — "
+        "for each position: symbol, quantity, average price you paid, "
+        "current market price, and unrealized **PnL** (profit or loss if "
+        "you closed it right now).\n\n"
+        "Currently empty — not yet wired to IBKR."
+    )
 
     positions = pd.DataFrame(
         columns=[
@@ -535,6 +722,14 @@ with tab3:
 
     # Risk Preview
     st.subheader("⚠️ Pre-Trade Risk")
+    explain(
+        "Will show how the order you're about to send would change your "
+        "**portfolio's Greeks** (Δ, Γ, ν, θ) — i.e. a 'before you click "
+        "send' risk check, so you can see the impact on your overall "
+        "exposure before committing.\n\n"
+        "Currently shows `0.00` placeholders — not yet wired to a live "
+        "portfolio."
+    )
 
     risk_col1, risk_col2, risk_col3, risk_col4 = st.columns(4)
 
@@ -547,6 +742,16 @@ with tab3:
 with tab4:
 
     st.header("🌀 Volatility Surface Analytics")
+    explain(
+        "A deeper dive into the **implied volatility (IV)** of the options "
+        "chain loaded in the **Données** tab (it reuses that data — open "
+        "Données first if this tab looks empty).\n\n"
+        "Implied volatility is the market's expectation of how much the "
+        "underlying will move, *implied* by current option prices. This "
+        "tab shows three classic views of it: a full **3D surface** "
+        "(strike × maturity), a **smile** (IV across strikes for one "
+        "maturity), and a **term structure** (ATM IV across maturities)."
+    )
 
     if "df_options" not in st.session_state:
         spot_now = get_spot(client, INDEX["conid"])
@@ -632,6 +837,15 @@ with tab4:
             # --------------------------------------------------
 
             st.subheader("🌀 3D Volatility Surface")
+            explain(
+                "Every option in the chain plotted as a 3D surface: "
+                "**Strike** on one axis, **Maturity** on the other, and "
+                "**implied volatility (IV %)** as the height/colour.\n\n"
+                "If IV were constant, this would be a flat plane. In "
+                "reality it usually curves — higher for far OTM strikes "
+                "(the 'smile') and changes shape across maturities (the "
+                "'term structure'). Drag to rotate, scroll to zoom."
+            )
 
             maturities = sorted(
                 df_surface["Maturity"].dropna().unique()
@@ -708,6 +922,16 @@ with tab4:
             # --------------------------------------------------
 
             st.subheader("📈 Volatility Smile")
+            explain(
+                "For **one chosen maturity**, plots implied volatility (IV %) "
+                "against **strike**. The classic shape is a 'smile' (or "
+                "'skew') — IV is often higher for strikes far away from the "
+                "current spot price than for at-the-money strikes, "
+                "reflecting that the market prices in a higher chance of "
+                "large moves than a simple constant-volatility model would "
+                "predict.\n\n"
+                "Use **Select Maturity** to switch between expiries."
+            )
 
             selected_mat = st.selectbox(
                 "Select Maturity",
@@ -751,6 +975,16 @@ with tab4:
             # --------------------------------------------------
 
             st.subheader("⏳ ATM Term Structure")
+            explain(
+                "For each maturity, takes the strike closest to the current "
+                "spot (the **at-the-money / ATM** option) and plots its "
+                "implied volatility. This is the **term structure of "
+                "volatility** — it shows whether the market expects more "
+                "turbulence in the near term or the long term.\n\n"
+                "An upward-sloping line means longer-dated options are "
+                "pricing in more uncertainty than near-term ones, and vice "
+                "versa."
+            )
 
             atm_points = []
 
@@ -808,6 +1042,18 @@ with tab4:
             # --------------------------------------------------
 
             st.subheader("📊 Surface Statistics")
+            explain(
+                "A quick numerical summary of the option chain used for the "
+                "surface above:\n\n"
+                "- **Quotes**: number of option contracts with usable IV "
+                "data\n"
+                "- **Maturities**: how many distinct expiry dates are "
+                "covered\n"
+                "- **Average IV / Max IV**: the mean and highest implied "
+                "volatility across all those quotes\n\n"
+                "The table below lists every individual quote that went "
+                "into the surface, smile, and term structure charts."
+            )
 
             c1, c2, c3, c4 = st.columns(4)
 

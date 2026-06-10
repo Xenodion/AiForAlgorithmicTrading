@@ -7,6 +7,8 @@ underlyings:
     currency: "EUR"
     futures_exchange: "EUREX"
     label: "Eurostoxx 50"
+    option_trading_class: "OESX"  # disambiguates option contracts
+    future_trading_class: "FESX"  # selects FESX (10x multiplier) over FSXE (1x)
 
   # Uncomment to add S&P 500 later
   # - symbol: "SPX"
@@ -26,3 +28,5 @@ option_chain:
 futures:
   # Tenors to monitor (in days/months)
   tenors: ["10d", "1m", "2m", "3m", "6m", "9m", "12m", "18m", "24m", "36m"]
+  # Maturities to discover for the futures chain (in months from today)
+  maturity_windows_months: [1, 2, 3, 6, 9, 12]

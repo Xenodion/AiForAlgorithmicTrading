@@ -9,9 +9,9 @@ from src.connectivity.session import IBKRClient
 
 logger = logging.getLogger(__name__)
 
-SPOT_FIELDS   = ["31", "84", "85", "70", "71", "82", "83"]
+SPOT_FIELDS   = ["31", "84", "86", "70", "71", "82", "83"]
 #                last  bid   ask   high  low   chg   chg%
-OPTION_FIELDS = ["31", "84", "85", "7308", "7309", "7310", "7311", "7636"]
+OPTION_FIELDS = ["31", "84", "86", "7308", "7309", "7310", "7311", "7636"]
 #                last  bid   ask   delta  gamma  vega   theta  IV%
 
 MONTH_MAP = {
@@ -164,7 +164,7 @@ def get_spot(client: IBKRClient, conid: int) -> dict:
         return {
             "last":  last,
             "bid":   _num(snap.get("84")),
-            "ask":   _num(snap.get("85")),
+            "ask":   _num(snap.get("86")),
             "high":  _num(snap.get("70")),
             "low":   _num(snap.get("71")),
             "close": close,
@@ -230,6 +230,8 @@ def get_futures_prices(client: IBKRClient, base_conid: int, fut_months: list[str
     """
     Resolve individual monthly futures conids via /iserver/secdef/info then snapshot them.
     Tries the futures root conid first; falls back to index conid.
+    Selects the FESX contract (multiplier=10) over FSXE (multiplier=1) when both
+    are returned for the same month.
     Returns list of { Month, Last, Bid, Ask }.
     """
     fut_root = _resolve_futures_root(client) or base_conid
@@ -237,21 +239,22 @@ def get_futures_prices(client: IBKRClient, base_conid: int, fut_months: list[str
     for month in fut_months[:24]:
         try:
             info = client.get("/iserver/secdef/info", params={
-                "conid": fut_root, "sectype": "FUT", "month": month,
+                "conid": fut_root, "sectype": "FUT", "month": month, "exchange": "EUREX",
             })
             if not (isinstance(info, list) and info):
                 continue
-            fut_conid = info[0].get("conid")
+            contract = next((c for c in info if c.get("tradingClass") == "FESX"), info[0])
+            fut_conid = contract.get("conid")
             if not fut_conid:
                 continue
 
-            snaps = client.snapshot([int(fut_conid)], ["31", "84", "85"])
+            snaps = client.snapshot([int(fut_conid)], ["31", "84", "86"])
             snap  = snaps[0] if isinstance(snaps, list) and snaps else {}
             rows.append({
                 "Month": month,
                 "Last":  _num(snap.get("31")),
                 "Bid":   _num(snap.get("84")),
-                "Ask":   _num(snap.get("85")),
+                "Ask":   _num(snap.get("86")),
             })
         except Exception as exc:
             logger.debug("futures %s: %s", month, exc)
@@ -305,7 +308,7 @@ def get_component_spots(client: IBKRClient, components: dict[str, dict]) -> list
     for i in range(0, len(conids), batch_size):
         batch = conids[i:i + batch_size]
         try:
-            snaps = client.snapshot(batch, ["31", "84", "85"])
+            snaps = client.snapshot(batch, ["31", "84", "86"])
             if not isinstance(snaps, list):
                 continue
             for snap in snaps:
@@ -317,7 +320,7 @@ def get_component_spots(client: IBKRClient, components: dict[str, dict]) -> list
                         "Name":   name,
                         "Last":   _num(snap.get("31")),
                         "Bid":    _num(snap.get("84")),
-                        "Ask":    _num(snap.get("85")),
+                        "Ask":    _num(snap.get("86")),
                     })
         except Exception as exc:
             logger.warning("component batch snapshot: %s", exc)
@@ -411,7 +414,7 @@ def get_options_table(client: IBKRClient, conid: int, months: list[str], spot: f
                 "Strike":   c["strike"],
                 "Type":     c["label"],
                 "Bid":      _num(s.get("84")),
-                "Ask":      _num(s.get("85")),
+                "Ask":      _num(s.get("86")),
                 "Last":     _num(s.get("31")),
                 "IV %":     _num(s.get("7636")),
                 "Delta":    _num(s.get("7308")),
