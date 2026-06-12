@@ -21,6 +21,7 @@ from src.data.fetcher import (
     resolve_index, get_spot, get_options_table,
     get_futures_prices, resolve_components, get_component_spots,
     get_price_history, get_strikes, get_option_conid,
+    select_futures_curve, FUTURES_TENORS, FUTURES_TENOR_MONTHS,
 )
 from src.analytics.pricer import black_scholes, greeks, scenario_grid, implied_volatility
 
@@ -128,7 +129,7 @@ st.caption(
 )
 
 tab1, tab2, tab3, tab4 = st.tabs(
-    ["📊 Données", "⚠️ Risques", "📤 Ordres", "🌀 Surface"]
+    ["📊 Data", "⚠️ Risk", "📤 Orders", "🌀 Surface"]
 )
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -230,27 +231,41 @@ with tab1:
     st.subheader("Futures Curve")
     explain(
         "The **futures curve** (a.k.a. term structure): the price of "
-        "**futures contracts** on the index across expiry months "
-        "(e.g. JUN26, SEP26...), each worth "
+        "**futures contracts** on the index at standard tenors — "
+        "10 days, 1 to 18 months, 2 years and 3 years — each worth "
         f"**{notional}€ per index point** (see the Multiplier setting above).\n\n"
         "- **Last**: most recent traded price\n"
         "- **Bid / Ask**: prices people are currently willing to trade at — "
         "often missing for far-dated contracts, since they trade rarely and "
         "have no live quote, only a last traded price\n\n"
+        "EUREX only lists **quarterly** expiries (Mar/Jun/Sep/Dec), so each "
+        "tenor is mapped to the closest available contract month — several "
+        "tenors can therefore point to the same expiry.\n\n"
         "An upward-sloping curve (further expiries priced higher) is called "
         "**contango**; a downward-sloping curve is **backwardation**."
     )
     with st.spinner("Loading futures..."):
-        fut_rows = get_futures_prices(client, INDEX["conid"], INDEX["fut_months"])
+        curve = select_futures_curve(INDEX["fut_months"], FUTURES_TENORS, FUTURES_TENOR_MONTHS)
+        curve_months = sorted({month for _, month in curve})
+        fut_rows = get_futures_prices(client, INDEX["conid"], curve_months)
 
-    if fut_rows:
-        df_fut = pd.DataFrame(fut_rows)
-        df_fut["Label"] = df_fut["Month"].apply(_month_label)
+    if fut_rows and curve:
+        price_by_month = {r["Month"]: r for r in fut_rows}
+        df_fut = pd.DataFrame([
+            {
+                "Tenor": tenor,
+                "Expiry": _month_label(month),
+                "Last": price_by_month.get(month, {}).get("Last"),
+                "Bid":  price_by_month.get(month, {}).get("Bid"),
+                "Ask":  price_by_month.get(month, {}).get("Ask"),
+            }
+            for tenor, month in curve
+        ])
 
         fig_fut = go.Figure()
         for col, color in [("Bid", "#66bb6a"), ("Last", "#42a5f5"), ("Ask", "#ef5350")]:
             fig_fut.add_trace(go.Scatter(
-                x=df_fut["Label"], y=df_fut[col], name=col,
+                x=df_fut["Tenor"], y=df_fut[col], name=col,
                 mode="lines+markers", line=dict(width=2, color=color),
                 marker=dict(size=6), connectgaps=False,
             ))
@@ -259,10 +274,11 @@ with tab1:
             template="plotly_dark",
             margin=dict(l=0, r=0, t=20, b=0),
             legend=dict(orientation="h", y=1.02),
-            xaxis_title="Expiry month",
+            xaxis_title="Tenor",
             yaxis_title="Index points",
         )
         st.plotly_chart(fig_fut, use_container_width=True)
+        st.dataframe(df_fut, use_container_width=True, hide_index=True)
     else:
         st.info("Futures data unavailable — retrying on next refresh.")
 
@@ -350,6 +366,7 @@ with tab1:
                     xaxis_title="Maturity",
                     yaxis_title="Strike",
                     zaxis_title="IV (%)",
+                    zaxis=dict(range=[0, surf["IV %"].max()]),
                 ),
                 margin=dict(l=0, r=0, t=40, b=0),
             )
@@ -453,7 +470,7 @@ with tab1:
 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
-    st.header("⚠️ Risques")
+    st.header("⚠️ Risk")
     explain(
         "This tab is a **risk and pricing toolbox**, independent of live "
         "market data — you choose all the inputs yourself.\n\n"
@@ -813,8 +830,8 @@ with tab4:
     st.header("🌀 Volatility Surface Analytics")
     explain(
         "A deeper dive into the **implied volatility (IV)** of the options "
-        "chain loaded in the **Données** tab (it reuses that data — open "
-        "Données first if this tab looks empty).\n\n"
+        "chain loaded in the **Data** tab (it reuses that data — open "
+        "Data first if this tab looks empty).\n\n"
         "Implied volatility is the market's expectation of how much the "
         "underlying will move, *implied* by current option prices. This "
         "tab shows three classic views of it: a full **3D surface** "
@@ -977,6 +994,7 @@ with tab4:
                     xaxis_title="Maturity",
                     yaxis_title="Strike",
                     zaxis_title="IV (%)",
+                    zaxis=dict(range=[0, surface_points["IV %"].max()]),
                     camera=dict(eye=dict(x=1.6, y=1.6, z=0.9)),
                 ),
                 margin=dict(l=0, r=0, t=45, b=0),

@@ -5,6 +5,7 @@ Returns plain dicts/lists — no pandas, no display logic here.
 
 from __future__ import annotations
 import logging
+from datetime import date
 from src.connectivity.session import IBKRClient
 
 logger = logging.getLogger(__name__)
@@ -13,6 +14,12 @@ SPOT_FIELDS   = ["31", "84", "86", "70", "71", "82", "83"]
 #                last  bid   ask   high  low   chg   chg%
 OPTION_FIELDS = ["31", "84", "86", "7308", "7309", "7310", "7311", "7636"]
 #                last  bid   ask   delta  gamma  vega   theta  IV%
+
+# Standard term-structure tenors (per teacher spec: ~10 days, 1-18 months,
+# 2 years, 3 years), paired 1:1 with the month offset used to pick the
+# closest available contract for each tenor.
+FUTURES_TENORS       = ["10d", "1m", "2m", "3m", "6m", "9m", "12m", "18m", "24m", "36m"]
+FUTURES_TENOR_MONTHS = [0,     1,    2,    3,    6,    9,    12,    18,    24,    36]
 
 MONTH_MAP = {
     "JAN": "01", "FEB": "02", "MAR": "03", "APR": "04",
@@ -259,6 +266,27 @@ def get_futures_prices(client: IBKRClient, base_conid: int, fut_months: list[str
         except Exception as exc:
             logger.debug("futures %s: %s", month, exc)
     return rows
+
+
+def select_futures_curve(fut_months: list[str], tenors: list[str],
+                          tenor_months: list[int]) -> list[tuple[str, str]]:
+    """
+    Pair each tenor label with the available contract month closest to
+    (today + tenor_months[i]). Returns [(tenor, month), ...] in tenor order.
+    EUREX only lists quarterly FESX expiries, so several tenors often map
+    to the same month.
+    """
+    if not fut_months:
+        return []
+
+    def month_index(yyyymm: str) -> int:
+        return int(yyyymm[:4]) * 12 + int(yyyymm[4:6]) - 1
+
+    today_idx = month_index(date.today().strftime("%Y%m"))
+    return [
+        (tenor, min(fut_months, key=lambda m: abs(month_index(m) - (today_idx + n))))
+        for tenor, n in zip(tenors, tenor_months)
+    ]
 
 
 # ── Component stocks ───────────────────────────────────────────────────────────
