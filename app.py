@@ -382,6 +382,75 @@ with tab1:
     else:
         st.info("Component data loading...")
 
+    st.divider()
+
+    # ── Component deep-dive ────────────────────────────────────────────────────
+    st.subheader("Component Deep-Dive")
+    explain(
+        "Pick one of the index's component stocks to see the same **spot "
+        "price** and **price history** views shown above for the "
+        f"{INDEX['name']} index itself, but for that single stock — "
+        "useful to inspect what's driving (or dragging) the index."
+    )
+
+    comp_symbols = sorted(COMPONENTS.keys(), key=lambda s: COMPONENTS[s]["name"].lower())
+    comp_labels = {s: f"{COMPONENTS[s]['name']} ({s})" for s in comp_symbols}
+    selected_symbol = st.selectbox(
+        "Stock", comp_symbols, format_func=lambda s: comp_labels[s],
+    )
+    comp_conid = COMPONENTS[selected_symbol]["conid"]
+    comp_name = COMPONENTS[selected_symbol]["name"]
+
+    with st.spinner(f"Loading {comp_name}..."):
+        comp_spot = get_spot(client, comp_conid)
+        if comp_spot.get("high") is None:
+            # First snapshot for a conid often only returns "last" - the
+            # rest of the fields populate once the subscription warms up.
+            time.sleep(2)
+            comp_spot = get_spot(client, comp_conid)
+
+    cc1, cc2, cc3, cc4, cc5, cc6 = st.columns(6)
+    comp_last  = comp_spot.get("last")
+    comp_close = comp_spot.get("close")
+    comp_delta = round(comp_last - comp_close, 2) if comp_last and comp_close else None
+
+    cc1.metric("Last",  _fmt(comp_last), f"{comp_delta:+,.2f}" if comp_delta else None)
+    cc2.metric("High",  _fmt(comp_spot.get("high")))
+    cc3.metric("Low",   _fmt(comp_spot.get("low")))
+    cc4.metric("Close", _fmt(comp_close))
+    cc5.metric("Chg",   _fmt(comp_spot.get("chg")))
+    cc6.metric("Chg %", f"{comp_spot.get('chg_p'):+.2f}%" if comp_spot.get("chg_p") else "—")
+
+    with st.spinner(f"Loading {comp_name} history..."):
+        comp_history = get_price_history(client, comp_conid, period=period, bar=bar)
+
+    if comp_history:
+        df_comp_hist = pd.DataFrame(comp_history)
+        fig_comp_hist = go.Figure()
+        fig_comp_hist.add_trace(go.Candlestick(
+            x=df_comp_hist["date"],
+            open=df_comp_hist["open"], high=df_comp_hist["high"],
+            low=df_comp_hist["low"],  close=df_comp_hist["close"],
+            name=comp_name,
+            increasing_line_color="#26a69a",
+            decreasing_line_color="#ef5350",
+        ))
+        df_comp_hist["ma50"] = df_comp_hist["close"].rolling(50).mean()
+        fig_comp_hist.add_trace(go.Scatter(
+            x=df_comp_hist["date"], y=df_comp_hist["ma50"],
+            name="50-bar MA", line=dict(color="#ff9800", width=1.5, dash="dot"),
+        ))
+        fig_comp_hist.update_layout(
+            height=420,
+            xaxis_rangeslider_visible=False,
+            template="plotly_dark",
+            margin=dict(l=0, r=0, t=20, b=0),
+            legend=dict(orientation="h", y=1.02),
+        )
+        st.plotly_chart(fig_comp_hist, use_container_width=True)
+    else:
+        st.info(f"Historical data unavailable for {comp_name}.")
+
 # ══════════════════════════════════════════════════════════════════════════════
 with tab2:
     st.header("⚠️ Risques")

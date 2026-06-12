@@ -268,6 +268,12 @@ def resolve_components(client: IBKRClient) -> dict[str, dict]:
     Resolve conids for all SX5E component stocks.
     Returns { symbol: { conid, name } }
     Call once at startup and cache the result.
+
+    A plain symbol search often returns same-ticker stocks from other
+    markets (e.g. "AIR" also matches AAR Corp on NYSE, "MC" also matches
+    Moelis & Co). Disambiguate using the expected primary exchange first,
+    falling back to a company-name match; skip the component entirely if
+    neither yields a confident match (better than showing the wrong stock).
     """
     resolved = {}
     for symbol, name, exchange in SX5E_COMPONENTS:
@@ -275,20 +281,28 @@ def resolve_components(client: IBKRClient) -> dict[str, dict]:
             results = client.search_contract(symbol)
             if not (isinstance(results, list) and results):
                 continue
-            # Prefer STK type matching the primary exchange
-            conid = None
-            for r in results:
-                sections = r.get("sections", [])
-                sec_types = [s.get("secType") for s in sections]
-                if "STK" in sec_types or not sections:
-                    conid = r.get("conid")
-                    if conid:
-                        break
+            stk_results = [
+                r for r in results
+                if "STK" in [s.get("secType") for s in r.get("sections", [])]
+            ]
+
+            conid = next(
+                (r.get("conid") for r in stk_results if r.get("description") == exchange),
+                None,
+            )
             if not conid:
-                conid = results[0].get("conid")
+                name_lo = name.lower()
+                for r in stk_results:
+                    company_lo = (r.get("companyName") or "").lower()
+                    if company_lo and (name_lo in company_lo or company_lo.split()[0] in name_lo):
+                        conid = r.get("conid")
+                        break
+
             if conid:
                 resolved[symbol] = {"conid": int(conid), "name": name}
                 logger.debug("Component %s -> conid=%s", symbol, conid)
+            else:
+                logger.warning("Component %s (%s): no confident listing match, skipping", symbol, name)
         except Exception as exc:
             logger.warning("resolve_components %s: %s", symbol, exc)
     logger.info("Resolved %d/%d components", len(resolved), len(SX5E_COMPONENTS))
