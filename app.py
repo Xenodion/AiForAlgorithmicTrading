@@ -80,6 +80,23 @@ def fill_missing_iv(df: pd.DataFrame, spot: float, rate: float = 0.03) -> pd.Dat
 
     return df
 
+
+def filter_liquid_maturities(df: pd.DataFrame, min_points: int = 5) -> tuple[pd.DataFrame, list[str]]:
+    """
+    Drop maturities with fewer than `min_points` usable IV quotes — typical
+    for the front month a few days from expiry, where the delayed feed has
+    no live bid/ask for most delta-target strikes. Without this, those
+    near-empty columns punch holes in the 3D IV surface.
+    """
+    counts = df.groupby("Maturity")["IV %"].apply(lambda s: s.notna().sum())
+    good = counts[counts >= min_points].index
+    if good.empty:
+        # Nothing meets the bar (e.g. a cold cache before quotes warm up) -
+        # showing a sparse surface beats showing none at all.
+        return df, []
+    dropped = list(counts[counts < min_points].index)
+    return df[df["Maturity"].isin(good)].copy(), dropped
+
 # ── Page config ────────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Volatility Infrastructure Platform",
@@ -290,13 +307,19 @@ with tab1:
     st.divider()
 
     # ── Options chain ──────────────────────────────────────────────────────────
-    st.subheader("Options Chain — -30Δ / ATM / +30Δ")
+    st.subheader("Options Chain — -30Δ to +30Δ (5Δ steps)")
     explain(
         "A snapshot of **option contracts** on the index for several "
-        "maturities, approximated around three strikes per expiry: a "
-        "put around **-30Δ** (out-of-the-money put), the **ATM** (at-the-money, "
-        "strike ≈ current spot), and a call around **+30Δ** "
-        "(out-of-the-money call) — picked here as roughly ±10% from spot.\n\n"
+        "maturities, with **one contract per delta target from -30 to "
+        "+30 in steps of 5** (-30, -25, ..., -5, ATM, +5, ..., +30 — 13 "
+        "targets) — out-of-the-money **puts** for negative targets, "
+        "out-of-the-money **calls** for positive targets, and **both a "
+        "Put and a Call at the at-the-money (ATM) target**.\n\n"
+        "- **Delta Target**: the approximate bucket this row was selected "
+        "for (e.g. `-30Δ`, `ATM`, `+15Δ`) — the strike is picked using a "
+        "rough %-from-spot proxy, so the **actual** delta is shown in the "
+        "**Delta** column\n"
+        "- **Type**: Put or Call\n"
         "- **Bid / Ask / Last**: option prices in index points\n"
         "- **IV %**: implied volatility — the market's expectation of future "
         "price swings, derived from the option's price\n"
@@ -310,15 +333,20 @@ with tab1:
     )
     spot_price = float(last or close or 0)
 
-    with st.spinner("Loading options (may take up to 60 s on first load)..."):
-        opt_rows = get_options_table(
-            client, INDEX["conid"], INDEX["opt_months"], spot_price
-        )
+    if "df_options" not in st.session_state and spot_price > 0:
+        with st.spinner("Loading options chain..."):
+            opt_rows = get_options_table(
+                client, INDEX["conid"], INDEX["opt_months"], spot_price
+            )
+            if opt_rows:
+                st.session_state["df_options"] = pd.DataFrame(opt_rows)
 
-    if opt_rows:
-        df_opt = pd.DataFrame(opt_rows)
-        df_opt = fill_missing_iv(df_opt, spot_price)
+    if st.button("🔄 Refresh option data"):
+        st.session_state.pop("df_options", None)
+        st.rerun()
 
+    if "df_options" in st.session_state:
+        df_opt = fill_missing_iv(st.session_state["df_options"], spot_price)
         st.session_state["df_options"] = df_opt
 
         # Add € columns next to each Greek
@@ -328,7 +356,7 @@ with tab1:
             )
 
         col_order = [
-            "Maturity", "Strike", "Type",
+            "Maturity", "Delta Target", "Strike", "Type",
             "Bid", "Ask", "Last", "IV %", "IV Source",
             "Delta", "Delta (€)",
             "Gamma", "Gamma (€)",
@@ -345,13 +373,20 @@ with tab1:
         st.subheader("Volatility Surface")
         explain(
             "A 3D view of **implied volatility (IV %)** across **Strike** and "
-            "**Maturity**, built from the options chain above.\n\n"
+            "**Maturity**, built from the options chain above (13 delta "
+            "targets from -30Δ to +30Δ, per maturity).\n\n"
             "Normally IV isn't flat — it forms a 'smile' or 'skew' shape across "
             "strikes, and a 'term structure' shape across maturities. This "
             "surface lets you see both at once. For a more detailed version "
             "with smile and term-structure charts, see the **Surface** tab."
         )
         surf = df_opt[df_opt["IV %"].notna() & df_opt["Strike"].notna()].copy()
+        surf, dropped_mats = filter_liquid_maturities(surf)
+        if dropped_mats:
+            st.caption(
+                "Excluded from surface (too few live quotes this close to "
+                f"expiry): {', '.join(dropped_mats)}"
+            )
 
         if not surf.empty:
             pivot = surf.pivot_table(
@@ -380,7 +415,7 @@ with tab1:
             st.info("Vol surface requires IV % data — loading...")
 
     else:
-        st.info("Options chain loading — this takes ~60 s on first load.")
+        st.info("Options chain loading — first load can take a few minutes.")
 
     st.divider()
 
@@ -544,8 +579,10 @@ with tab2:
         "Greeks (Δ, Γ, ν) — a fast linear/quadratic approximation\n"
         "- **Error**: the difference between the two — shows how good the "
         "Greeks approximation is, especially for larger moves\n\n"
-        "The colored grid is the full-repricing P&L: green = gains, "
-        "red = losses, in €."
+        "The heatmap below is the full-repricing P&L: the **y-axis** is the "
+        "spot shock, the **x-axis** is the vol shock, each cell shows the "
+        "€ P&L for that combination, and the colorbar on the right is the "
+        "legend — green = gains, red = losses, white ≈ €0 (today)."
     )
     st.caption("Full repricing vs Greeks approximation under spot × vol shocks")
 
@@ -561,20 +598,51 @@ with tab2:
     )
     df_scen = pd.DataFrame(scenarios)
 
-    # Pivot: rows = spot shock, columns = vol shock, values = P&L (full)
-    pivot = df_scen.pivot_table(
-        values="P&L (full)", index="Spot shock", columns="Vol shock", aggfunc="sum"
-    )
     st.markdown("**P&L (full repricing, €)**")
-    st.dataframe(
-        pivot.style.background_gradient(cmap="RdYlGn", axis=None),
-        use_container_width=True,
+    pnl_grid = df_scen["P&L (full)"].to_numpy().reshape(len(spot_shocks), len(vol_shocks))
+    fig_heat = go.Figure(go.Heatmap(
+        z=pnl_grid,
+        x=[f"{v:+.0%}" for v in vol_shocks],
+        y=[f"{s:+.0%}" for s in spot_shocks],
+        colorscale="RdYlGn",
+        zmid=0,
+        text=pnl_grid,
+        texttemplate="%{text:+,.0f}",
+        textfont=dict(size=11),
+        colorbar=dict(title="P&L (€)"),
+        hovertemplate="Spot shock %{y}, Vol shock %{x}<br>P&L = %{z:+,.2f} €<extra></extra>",
+    ))
+    fig_heat.update_layout(
+        height=400,
+        template="plotly_dark",
+        margin=dict(l=0, r=0, t=10, b=0),
+        xaxis_title="Vol shock (Δσ, percentage points)",
+        yaxis_title="Spot shock (%)",
     )
+    st.plotly_chart(fig_heat, use_container_width=True)
 
     st.markdown("**Full scenario table**")
     st.dataframe(df_scen, use_container_width=True, hide_index=True)
 
     st.divider()
+
+    # ── Greeks cheat-sheet ─────────────────────────────────────────────────────
+    st.markdown("#### 🔑 Greeks cheat-sheet")
+    st.caption("Quick reference for the columns in the portfolio table below")
+    st.markdown(
+        "| Greek | Symbol | What it measures | Quick read |\n"
+        "|---|---|---|---|\n"
+        "| Delta | Δ | € change in option value per **1-point move** in the underlying | "
+        "Calls: 0 → 1, Puts: -1 → 0. At-the-money ≈ ±0.5 |\n"
+        "| Gamma | Γ | How fast **Delta itself changes** as the spot moves | "
+        "Highest near the money & close to expiry — your Delta estimate goes stale fastest here |\n"
+        "| Vega | ν | € change in option value per **1% move in volatility** | "
+        "Always positive for long options — higher vol = more valuable |\n"
+        "| Theta | θ | € change in option value per **day that passes** | "
+        "Usually negative for long options — the 'rent' you pay for holding it |\n"
+        "| Rho | ρ | € change in option value per **1% move in interest rates** | "
+        "Usually the smallest effect, especially for short-dated options |\n"
+    )
 
     # ── Portfolio Builder ──────────────────────────────────────────────────────
     st.subheader("📋 Portfolio Builder")
@@ -990,6 +1058,13 @@ with tab4:
             df_surface["IV %"].notna()
         ].copy()
 
+        df_surface, dropped_mats = filter_liquid_maturities(df_surface)
+        if dropped_mats:
+            st.caption(
+                "Excluded (too few live quotes this close to expiry): "
+                f"{', '.join(dropped_mats)}"
+            )
+
         if df_surface.empty:
             st.warning("No IV data available.")
             priced_rows = st.session_state["df_options"].apply(
@@ -1096,12 +1171,16 @@ with tab4:
             st.subheader("📈 Volatility Smile")
             explain(
                 "For **one chosen maturity**, plots implied volatility (IV %) "
-                "against **strike**. The classic shape is a 'smile' (or "
-                "'skew') — IV is often higher for strikes far away from the "
-                "current spot price than for at-the-money strikes, "
-                "reflecting that the market prices in a higher chance of "
-                "large moves than a simple constant-volatility model would "
-                "predict.\n\n"
+                "against **strike**, as separate **Put** and **Call** lines. "
+                "The classic shape is a 'smile' (or 'skew') — IV is often "
+                "higher for strikes far away from the current spot price "
+                "than for at-the-money strikes, reflecting that the market "
+                "prices in a higher chance of large moves than a simple "
+                "constant-volatility model would predict.\n\n"
+                "Around the **ATM strike**, both a Put and a Call quote "
+                "exist — by put-call parity their implied vols should be "
+                "very close but not always identical, which is why the two "
+                "lines may diverge slightly there.\n\n"
                 "Use **Select Maturity** to switch between expiries."
             )
 
@@ -1110,29 +1189,29 @@ with tab4:
                 maturities
             )
 
-            smile = (
-                df_surface[
-                    df_surface["Maturity"] == selected_mat
-                ]
-                .sort_values("Strike")
-            )
+            mat_data = df_surface[df_surface["Maturity"] == selected_mat]
 
             fig_smile = go.Figure()
 
-            fig_smile.add_trace(
-                go.Scatter(
-                    x=smile["Strike"],
-                    y=smile["IV %"],
-                    mode="lines+markers",
-                    name="IV Smile"
-                )
-            )
+            for opt_type, color in [("Put", "#ef5350"), ("Call", "#42a5f5")]:
+                side = mat_data[mat_data["Type"] == opt_type].sort_values("Strike")
+                if not side.empty:
+                    fig_smile.add_trace(
+                        go.Scatter(
+                            x=side["Strike"],
+                            y=side["IV %"],
+                            mode="lines+markers",
+                            name=f"{opt_type} IV",
+                            line=dict(color=color),
+                        )
+                    )
 
             fig_smile.update_layout(
                 height=450,
                 xaxis_title="Strike",
                 yaxis_title="Implied Volatility (%)",
-                template="plotly_dark"
+                template="plotly_dark",
+                legend=dict(orientation="h", y=1.02),
             )
 
             st.plotly_chart(
@@ -1149,10 +1228,14 @@ with tab4:
             st.subheader("⏳ ATM Term Structure")
             explain(
                 "For each maturity, takes the strike closest to the current "
-                "spot (the **at-the-money / ATM** option) and plots its "
-                "implied volatility. This is the **term structure of "
+                "spot (the **at-the-money / ATM** option) and averages the "
+                "implied volatility of its **Put and Call** quotes, then "
+                "plots that value. This is the **term structure of "
                 "volatility** — it shows whether the market expects more "
                 "turbulence in the near term or the long term.\n\n"
+                "Averaging the put and call at each maturity gives two "
+                "data points instead of one, so a single missing quote "
+                "doesn't create a gap in the line.\n\n"
                 "An upward-sloping line means longer-dated options are "
                 "pricing in more uncertainty than near-term ones, and vice "
                 "versa."
@@ -1169,16 +1252,17 @@ with tab4:
                 if temp.empty:
                     continue
 
-                idx = (
-                    temp["Strike"] - surface_spot
-                ).abs().idxmin()
+                nearest_strike = temp.loc[
+                    (temp["Strike"] - surface_spot).abs().idxmin(), "Strike"
+                ]
 
-                atm_row = temp.loc[idx]
+                atm_iv = temp.loc[temp["Strike"] == nearest_strike, "IV %"].mean()
 
-                atm_points.append({
-                    "Maturity": maturity,
-                    "ATM IV": atm_row["IV %"]
-                })
+                if pd.notna(atm_iv):
+                    atm_points.append({
+                        "Maturity": maturity,
+                        "ATM IV": atm_iv
+                    })
 
             df_term = pd.DataFrame(atm_points)
 

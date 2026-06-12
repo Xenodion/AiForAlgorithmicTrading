@@ -33,6 +33,22 @@ Onlget 3: envoie des ordres
 
 --------
 
+La volatilité implicite est sous la forme d'un smile 
 
+La volatilité pour un put et un call est très proche mais pas exactement la même, il demande aussi à les afficher dans un graphe 2D
+
+La calculer pour chaque sous-jacent, la volatilité n'est pas exactement la même.
+
+Il faut les greeks en valeur bruts et ensuite en $ ou € en fonction de SnP500 ou Eurostoxx50
+
+Il faut ajouter pour chacun des strikes le root time vega
+--------
+
+Stratégie de dispersion : 
+
+1 - achat straddle maturité 1 au ATM top 10 Eurostoxx 50
+2 - daily delta hedge future indice
+3 - roll si composants du straddle n'appartiennent [pas 0,4 ; 0,6] en VA 
+4 - roll si maturité straddle < 
 
 --------
