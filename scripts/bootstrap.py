@@ -42,36 +42,36 @@ SPOT_FIELDS = ["31", "84", "86", "70", "71", "82", "83", "6509"]
 
 
 def section(title: str) -> None:
-    logger.info("─" * 55)
+    logger.info("-" * 55)
     logger.info("  %s", title)
-    logger.info("─" * 55)
+    logger.info("-" * 55)
 
 
 def main() -> None:
     client = IBKRClient.from_config(str(CONFIG_PATH))
 
-    section("1 — Auth check")
+    section("1 - Auth check")
     auth = client.check_auth()
     logger.info("Status: %s", auth)
 
-    section("2 — Accounts")
+    section("2 - Accounts")
     accounts = client.get_accounts()
     logger.info("Accounts: %s", accounts)
 
-    section("3 — Resolve Eurostoxx 50 index")
+    section("3 - Resolve Eurostoxx 50 index")
     conid = None
     for symbol in ["ESTX50", "SX5E", "STOXX50E", "IBEX"]:
         results = client.search_contract(symbol)
-        logger.info("Search '%s' → %s", symbol, results)
+        logger.info("Search '%s' -> %s", symbol, results)
         if isinstance(results, list) and results:
             contract = results[0]
             conid = contract.get("conid")
             logger.info("Found: %s  conId=%s", contract.get("companyName", symbol), conid)
             break
     if not conid:
-        raise RuntimeError("Could not resolve index — see search results above.")
+        raise RuntimeError("Could not resolve index - see search results above.")
 
-    section("4 — Spot price snapshot + market-data entitlement")
+    section("4 - Spot price snapshot + market-data entitlement")
     snaps = client.snapshot([conid], SPOT_FIELDS)
     snap = snaps[0] if snaps else {}
 
@@ -90,7 +90,7 @@ def main() -> None:
 
     if last is None:
         logger.warning(
-            "No 'last' price returned — check market-data entitlement, "
+            "No 'last' price returned - check market-data entitlement, "
             "or the snapshot subscription may need a moment to warm up."
         )
     elif availability and "R" not in str(availability):
@@ -101,7 +101,7 @@ def main() -> None:
     else:
         logger.info("Market data entitlement OK.")
 
-    section("5 — Write proof record")
+    section("5 - Write proof record")
     record = {
         "run_ts": datetime.now(timezone.utc).isoformat(),
         "auth": auth,

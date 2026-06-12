@@ -43,28 +43,28 @@ ANALYTICS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def section(title: str) -> None:
-    logger.info("─" * 55)
+    logger.info("-" * 55)
     logger.info("  %s", title)
-    logger.info("─" * 55)
+    logger.info("-" * 55)
 
 
 def main() -> None:
     client = IBKRClient.from_config(str(BROKER_CONFIG_PATH))
 
-    section("1 — Auth check")
+    section("1 - Auth check")
     auth = client.check_auth()
     logger.info("Status: %s", auth)
 
-    section("2 — Load universe config")
+    section("2 - Load universe config")
     config_text = UNIVERSE_CONFIG_PATH.read_text(encoding="utf-8")
     config = yaml.safe_load(config_text)
     config_hash = hashlib.sha256(config_text.encode("utf-8")).hexdigest()[:8]
     logger.info("config_hash=%s", config_hash)
 
-    section("3 — Discover universe")
+    section("3 - Discover universe")
     universe, raw_payloads = build_universe(client, config, config_hash)
 
-    section("4 — Data quality")
+    section("4 - Data quality")
     errors = universe["quality"]["errors"]
     warnings = universe["quality"]["warnings"]
     for msg in errors:
@@ -74,13 +74,13 @@ def main() -> None:
     if not errors and not warnings:
         logger.info("No issues found.")
 
-    section("5 — Write raw payload dump")
+    section("5 - Write raw payload dump")
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     raw_path = RAW_DIR / f"universe_raw_{ts}.json"
     raw_path.write_text(json.dumps(raw_payloads, indent=2, default=str), encoding="utf-8")
     logger.info("Written: %s", raw_path)
 
-    section("6 — Write normalized universe")
+    section("6 - Write normalized universe")
     universe["raw_payload_file"] = raw_path.name
     out_path = ANALYTICS_DIR / f"universe_{universe['trade_date']}.json"
     out_path.write_text(json.dumps(universe, indent=2, default=str), encoding="utf-8")

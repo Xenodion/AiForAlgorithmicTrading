@@ -141,13 +141,13 @@ def resolve_index(client: IBKRClient, symbols=("ESTX50", "SX5E", "STOXX50E")) ->
                 "opt_months": opt_months,
                 "fut_months": fut_months,
             }
-            logger.info("Resolved %s → conid=%s  opt=%d months  fut=%d months",
+            logger.info("Resolved %s -> conid=%s  opt=%d months  fut=%d months",
                         sym, conid, len(opt_months), len(fut_months))
             return info
         except Exception as exc:
             logger.warning("resolve_index %s: %s", sym, exc)
 
-    raise RuntimeError("Could not resolve index — check IBKR entitlements")
+    raise RuntimeError("Could not resolve index - check IBKR entitlements")
 
 
 # ── Spot price ─────────────────────────────────────────────────────────────────
@@ -219,7 +219,7 @@ def _resolve_futures_root(client: IBKRClient) -> int | None:
             if isinstance(results, list) and results:
                 conid = results[0].get("conid")
                 if conid:
-                    logger.info("Futures root: %s → conid=%s", sym, conid)
+                    logger.info("Futures root: %s -> conid=%s", sym, conid)
                     return int(conid)
         except Exception as exc:
             logger.debug("futures root %s: %s", sym, exc)
@@ -288,7 +288,7 @@ def resolve_components(client: IBKRClient) -> dict[str, dict]:
                 conid = results[0].get("conid")
             if conid:
                 resolved[symbol] = {"conid": int(conid), "name": name}
-                logger.debug("Component %s → conid=%s", symbol, conid)
+                logger.debug("Component %s -> conid=%s", symbol, conid)
         except Exception as exc:
             logger.warning("resolve_components %s: %s", symbol, exc)
     logger.info("Resolved %d/%d components", len(resolved), len(SX5E_COMPONENTS))
