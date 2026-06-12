@@ -23,7 +23,7 @@ from src.data.fetcher import (
     get_price_history, get_strikes, get_option_conid,
     select_futures_curve, FUTURES_TENORS, FUTURES_TENOR_MONTHS,
 )
-from src.analytics.pricer import black_scholes, greeks, scenario_grid, implied_volatility
+from src.analytics.pricer import black_scholes, greeks, scenario_grid, implied_volatility, pnl_approximation
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -241,6 +241,11 @@ with tab1:
         "EUREX only lists **quarterly** expiries (Mar/Jun/Sep/Dec), so each "
         "tenor is mapped to the closest available contract month — several "
         "tenors can therefore point to the same expiry.\n\n"
+        "⚠️ **Note on far-dated points**: where Bid/Ask are missing, "
+        "**Last** is not a live price — it's whatever that contract's most "
+        "recent trade happened to be, which could be days or weeks old. "
+        "Don't read zigzags at the long end as today's curve shape, just "
+        "as old prints from an illiquid contract.\n\n"
         "An upward-sloping curve (further expiries priced higher) is called "
         "**contango**; a downward-sloping curve is **backwardation**."
     )
@@ -663,6 +668,86 @@ with tab2:
         st.metric("Estimated portfolio P&L", f"€ {total_pnl:+,.2f}")
     else:
         st.info("Add positions above to build your portfolio.")
+
+    st.divider()
+
+    # ── Portfolio Backtest ─────────────────────────────────────────────────────
+    st.subheader("📈 Portfolio Backtest")
+    explain(
+        "Replays your current portfolio (above) against the real "
+        f"historical price of {INDEX['name']}: for each past trading day, "
+        "'what would this exact portfolio be worth if the index had been "
+        "at that day's level (with correspondingly more time to maturity), "
+        "compared to its value today?'\n\n"
+        "- **P&L (full)**: re-runs Black-Scholes — S = f(S₀, K, T, r, σ) — "
+        "with the historical spot and adjusted maturity: the *exact* "
+        "theoretical P&L\n"
+        "- **P&L (Greeks)**: applies today's Greeks linearly to the "
+        "realized spot move and elapsed time — dV ≈ Σ ∂F/∂x · dx: the fast "
+        "approximation\n"
+        "- **Error**: full minus approx — shows where the linear "
+        "approximation breaks down for larger historical moves\n\n"
+        "**Note**: volatility σ is held constant at each position's "
+        "current value for every historical day, since IBKR doesn't "
+        "provide historical implied vol — only spot-price and time-decay "
+        "effects are backtested."
+    )
+
+    if st.session_state.portfolio:
+        bt_period = st.select_slider(
+            "Backtest lookback", options=["1m", "3m", "6m", "1y"], value="3m"
+        )
+        with st.spinner("Loading historical prices..."):
+            bt_history = get_price_history(client, INDEX["conid"], period=bt_period, bar="1d")
+
+        if bt_history:
+            today_date = bt_history[-1]["date"]
+            bt_rows = []
+            for h in bt_history:
+                S_i = h["close"]
+                if S_i is None:
+                    continue
+                days_ago = (today_date - h["date"]).days
+
+                pnl_full = pnl_approx = 0.0
+                for pos in st.session_state.portfolio:
+                    T_i     = pos["_T"] + days_ago / 365
+                    V_i     = black_scholes(S_i,    pos["_K"], T_i,       pos["_r"], pos["_sigma"], pos["_type"])
+                    V_today = black_scholes(S_live, pos["_K"], pos["_T"], pos["_r"], pos["_sigma"], pos["_type"])
+                    pnl_full += (V_today - V_i) * pos["Qty"] * pos["Mult"]
+                    pnl_approx += pnl_approximation(
+                        pos["Δ"], pos["Γ"], pos["ν"], pos["θ"],
+                        dS=S_live - S_i, d_sigma=0, dt=days_ago,
+                        multiplier=pos["Mult"],
+                    ) * pos["Qty"]
+
+                bt_rows.append({
+                    "Date": h["date"], "Spot": S_i,
+                    "P&L (full)": round(pnl_full, 2),
+                    "P&L (Greeks)": round(pnl_approx, 2),
+                    "Error": round(pnl_full - pnl_approx, 2),
+                })
+
+            df_bt = pd.DataFrame(bt_rows)
+
+            fig_bt = go.Figure()
+            for col, color in [("P&L (full)", "#42a5f5"), ("P&L (Greeks)", "#ffa726"), ("Error", "#ef5350")]:
+                fig_bt.add_trace(go.Scatter(
+                    x=df_bt["Date"], y=df_bt[col], name=col,
+                    mode="lines", line=dict(width=2, color=color),
+                ))
+            fig_bt.update_layout(
+                height=380, template="plotly_dark",
+                margin=dict(l=0, r=0, t=20, b=0),
+                legend=dict(orientation="h", y=1.02),
+                xaxis_title="Date", yaxis_title="Portfolio P&L (€)",
+            )
+            st.plotly_chart(fig_bt, use_container_width=True)
+            st.dataframe(df_bt, use_container_width=True, hide_index=True)
+        else:
+            st.info("Historical data unavailable.")
+    else:
+        st.info("Add positions to the portfolio above to run a backtest.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 with tab3:
