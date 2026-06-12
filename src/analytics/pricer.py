@@ -45,6 +45,41 @@ def black_scholes(S: float, K: float, T: float, r: float, sigma: float,
         return K * exp(-r * T) * _cdf(-d2) - S * _cdf(-d1)
 
 
+def implied_volatility(price: float, S: float, K: float, T: float, r: float,
+                       option_type: str = "call",
+                       low: float = 1e-4, high: float = 5.0,
+                       tol: float = 1e-5, max_iter: int = 100) -> float | None:
+    """
+    Solve Black-Scholes implied volatility by bisection.
+    Returns decimal volatility, or None when the market price is not invertible.
+    """
+    if price is None or S <= 0 or K <= 0 or T <= 0:
+        return None
+    if not all(isfinite(v) for v in (price, S, K, T, r)):
+        return None
+
+    intrinsic = max(S - K, 0.0) if option_type == "call" else max(K - S, 0.0)
+    if price <= intrinsic:
+        return None
+
+    low_price = black_scholes(S, K, T, r, low, option_type)
+    high_price = black_scholes(S, K, T, r, high, option_type)
+    if price < low_price or price > high_price:
+        return None
+
+    for _ in range(max_iter):
+        mid = (low + high) / 2.0
+        mid_price = black_scholes(S, K, T, r, mid, option_type)
+        if abs(mid_price - price) < tol:
+            return mid
+        if mid_price < price:
+            low = mid
+        else:
+            high = mid
+
+    return (low + high) / 2.0
+
+
 def greeks(S: float, K: float, T: float, r: float, sigma: float,
            option_type: str = "call", multiplier: float = 1.0) -> dict:
     """

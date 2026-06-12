@@ -85,13 +85,29 @@ Open your browser → **https://localhost:5000**
 - Select **Paper Trading**
 - Wait for "Client login succeeds"
 
-### Step 3 — Launch the dashboard
+### Step 3 — (Optional) Run the health-check / bootstrap script
+
+Verifies the whole connectivity chain end-to-end without placing any orders —
+auth, accounts, index resolution, spot snapshot, and market-data entitlement.
+Useful after a fresh setup or when something feels off.
+
+```powershell
+.venv\Scripts\python scripts\bootstrap.py
+```
+
+Expected output: `Auth OK`, your account ID, the resolved Euro STOXX 50 conid,
+a spot snapshot with `last`/`close`/`chg`, and a market-data availability code.
+
+> `availability=D` (Delayed) is **normal** for paper trading accounts — `R`
+> means real-time. A proof record is written to `data/raw/`.
+
+### Step 4 — Launch the dashboard
 
 ```powershell
 .venv\Scripts\streamlit run app.py
 ```
 
-### Step 4 — Open the dashboard
+### Step 5 — Open the dashboard
 
 Goes to **http://localhost:8501** automatically. If not, open it manually.
 
@@ -100,9 +116,12 @@ Goes to **http://localhost:8501** automatically. If not, open it manually.
 ## Project structure
 
 ```
-app.py                  # Main Streamlit app (3 tabs)
+app.py                  # Main Streamlit app (4 tabs)
 configs/
   broker.yaml           # IBKR gateway URL
+  universe.yaml         # Monitored underlyings, option/futures tenors
+scripts/
+  bootstrap.py          # Health-check / connectivity smoke test
 src/
   connectivity/
     session.py          # IBKRClient — REST wrapper + auth
@@ -110,6 +129,8 @@ src/
     fetcher.py          # Spot, futures, options, history, components
   analytics/
     pricer.py           # Black-Scholes pricer + Greeks + scenario grid
+data/
+  raw/                  # Bootstrap proof records (JSON)
 docs/
   START.md              # Short startup cheatsheet
   roadmap.md            # 16-step project roadmap
@@ -124,7 +145,8 @@ requirements.txt
 |-----|---------|
 | **Données** | Live spot, 3Y price history, futures curve, options chain with Greeks, vol surface, all 50 SX5E components |
 | **Risques** | Black-Scholes pricer, scenario P&L grid (spot × vol), portfolio builder with Greek aggregation |
-| **Ordres** | Coming soon |
+| **Ordres** | Order entry / account / positions UI (not yet connected to order routing) |
+| **Surface** | 3D implied vol surface, vol smile, ATM term structure |
 
 ---
 

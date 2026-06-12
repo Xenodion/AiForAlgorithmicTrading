@@ -1,0 +1,89 @@
+{
+  "run_ts": "2026-06-12T07:31:52.307037+00:00",
+  "auth": {
+    "authenticated": true,
+    "established": true,
+    "competing": false,
+    "connected": true,
+    "message": "",
+    "MAC": "06:77:1C:50:D0:CE",
+    "serverInfo": {
+      "serverName": "JifZ12017",
+      "serverVersion": "Build 10.46.1l, Jun 9, 2026 6:06:08 PM"
+    },
+    "hardware_info": "99a5efd8|06:77:1C:50:D0:CE",
+    "fail": ""
+  },
+  "accounts": [
+    "DUQ632067"
+  ],
+  "contract": {
+    "conid": "4356500",
+    "raw": {
+      "conid": "4356500",
+      "companyHeader": "Euro STOXX50 - EUREX",
+      "companyName": "Euro STOXX50",
+      "symbol": "ESTX50",
+      "description": "EUREX",
+      "restricted": null,
+      "sections": [
+        {
+          "secType": "IND",
+          "exchange": "EUREX;"
+        },
+        {
+          "secType": "FUT",
+          "months": "JUN26;SEP26;DEC26;MAR27;JUN27;SEP27;DEC27;MAR28;JUN28;SEP28;DEC28;MAR29",
+          "exchange": "EUREX",
+          "showPrips": true
+        },
+        {
+          "secType": "OPT",
+          "months": "JUN26;JUL26;AUG26;SEP26;OCT26;NOV26;DEC26;JAN27;FEB27;MAR27;APR27;MAY27;JUN27;SEP27;DEC27;MAR28;JUN28;SEP28;DEC28;MAR29;JUN29;DEC29;DEC30;DEC31;DEC32;DEC33;DEC34;DEC35",
+          "exchange": "EUREX"
+        },
+        {
+          "secType": "WAR",
+          "months": "MAY26;JUN26;JUL26;AUG26;SEP26;OCT26;NOV26;DEC26;JAN27;FEB27;MAR27;APR27;MAY27;JUN27;SEP27;DEC27;MAR28;JUN28;DEC28;JUN38",
+          "exchange": "EBS;FWB;SBF;SWB"
+        },
+        {
+          "secType": "IOPT"
+        },
+        {
+          "secType": "BAG"
+        },
+        {
+          "secType": "BAG",
+          "exchange": "EUREX",
+          "legSecType": "FUT"
+        }
+      ]
+    }
+  },
+  "snapshot": {
+    "raw": {
+      "conidEx": "4356500",
+      "_updated": 1781249505194,
+      "server_id": "q0",
+      "6509": "D",
+      "70": "6145.15",
+      "conid": 4356500,
+      "6119": "q0",
+      "71": "6076.44",
+      "82": "+77.64",
+      "83": 1.28,
+      "31": "6134.60",
+      "6508": "&serviceID1=229&serviceID2=6666&serviceID3=1318&serviceID4=1317&serviceID5=230"
+    },
+    "last": 6134.6,
+    "close": 6056.96,
+    "chg": 77.64,
+    "chg_p": 1.28,
+    "bid": null,
+    "ask": null,
+    "high": 6145.15,
+    "low": 6076.44,
+    "market_data_availability": "D"
+  }
+}

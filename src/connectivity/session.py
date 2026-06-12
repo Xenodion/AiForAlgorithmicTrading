@@ -72,7 +72,7 @@ class IBKRClient:
             raise ConnectionError(
                 "Not authenticated. Open https://localhost:5000 in your browser and log in."
             )
-        logger.info("Auth OK — connected=%s, competing=%s",
+        logger.info("Auth OK - connected=%s, competing=%s",
                     status.get("connected"), status.get("competing"))
         return status
 
@@ -109,7 +109,8 @@ class IBKRClient:
         Returns a list of dicts keyed by field ID.
 
         Common field IDs:
-          31=last, 84=bid, 85=ask, 70=high, 71=low
+          31=last, 84=bid, 86=ask, 70=high, 71=low, 82=chg, 83=chg%
+          85=ask size (NOT ask price)
           7308=delta, 7309=gamma, 7310=vega, 7311=theta, 7636=IV%
         """
         params = {

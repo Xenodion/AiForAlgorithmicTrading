@@ -7,6 +7,8 @@ underlyings:
     currency: "EUR"
     futures_exchange: "EUREX"
     label: "Eurostoxx 50"
+    option_trading_class: "OESX"  # disambiguates option contracts
+    future_trading_class: "FESX"  # selects FESX (10x multiplier) over FSXE (1x)
 
   # Uncomment to add S&P 500 later
   # - symbol: "SPX"
@@ -18,11 +20,17 @@ underlyings:
 option_chain:
   # Maturities to monitor (in months from today)
   maturity_windows_months: [1, 2, 3, 6, 9, 12, 18]
-  # Delta range for option selection
-  delta_targets: [-0.30, 0.0, 0.30]  # -30Δ, ATM, +30Δ
+  # Strike selection: one contract per delta target from -30 to +30
+  # in steps of delta_step (Puts for negative targets, Calls for
+  # positive), plus both a Put and a Call at the ATM (0) target.
+  # Strikes are picked via an OTM% proxy (|delta|/30 * 10%); the real
+  # per-contract Delta from IBKR is shown in the "Delta" column.
+  delta_step: 5
   min_open_interest: 10
-  max_strikes_per_expiry: 50
 
 futures:
   # Tenors to monitor (in days/months)
   tenors: ["10d", "1m", "2m", "3m", "6m", "9m", "12m", "18m", "24m", "36m"]
+  # Maturities to discover for the futures chain (in months from today),
+  # 1:1 aligned with `tenors` above (0 ~= 10 days)
+  maturity_windows_months: [0, 1, 2, 3, 6, 9, 12, 18, 24, 36]

@@ -5,14 +5,21 @@ Returns plain dicts/lists — no pandas, no display logic here.
 
 from __future__ import annotations
 import logging
+from datetime import date
 from src.connectivity.session import IBKRClient
 
 logger = logging.getLogger(__name__)
 
-SPOT_FIELDS   = ["31", "84", "85", "70", "71", "82", "83"]
+SPOT_FIELDS   = ["31", "84", "86", "70", "71", "82", "83"]
 #                last  bid   ask   high  low   chg   chg%
-OPTION_FIELDS = ["31", "84", "85", "7308", "7309", "7310", "7311", "7636"]
+OPTION_FIELDS = ["31", "84", "86", "7308", "7309", "7310", "7311", "7636"]
 #                last  bid   ask   delta  gamma  vega   theta  IV%
+
+# Standard term-structure tenors (per teacher spec: ~10 days, 1-18 months,
+# 2 years, 3 years), paired 1:1 with the month offset used to pick the
+# closest available contract for each tenor.
+FUTURES_TENORS       = ["10d", "1m", "2m", "3m", "6m", "9m", "12m", "18m", "24m", "36m"]
+FUTURES_TENOR_MONTHS = [0,     1,    2,    3,    6,    9,    12,    18,    24,    36]
 
 MONTH_MAP = {
     "JAN": "01", "FEB": "02", "MAR": "03", "APR": "04",
@@ -141,13 +148,13 @@ def resolve_index(client: IBKRClient, symbols=("ESTX50", "SX5E", "STOXX50E")) ->
                 "opt_months": opt_months,
                 "fut_months": fut_months,
             }
-            logger.info("Resolved %s → conid=%s  opt=%d months  fut=%d months",
+            logger.info("Resolved %s -> conid=%s  opt=%d months  fut=%d months",
                         sym, conid, len(opt_months), len(fut_months))
             return info
         except Exception as exc:
             logger.warning("resolve_index %s: %s", sym, exc)
 
-    raise RuntimeError("Could not resolve index — check IBKR entitlements")
+    raise RuntimeError("Could not resolve index - check IBKR entitlements")
 
 
 # ── Spot price ─────────────────────────────────────────────────────────────────
@@ -164,7 +171,7 @@ def get_spot(client: IBKRClient, conid: int) -> dict:
         return {
             "last":  last,
             "bid":   _num(snap.get("84")),
-            "ask":   _num(snap.get("85")),
+            "ask":   _num(snap.get("86")),
             "high":  _num(snap.get("70")),
             "low":   _num(snap.get("71")),
             "close": close,
@@ -219,7 +226,7 @@ def _resolve_futures_root(client: IBKRClient) -> int | None:
             if isinstance(results, list) and results:
                 conid = results[0].get("conid")
                 if conid:
-                    logger.info("Futures root: %s → conid=%s", sym, conid)
+                    logger.info("Futures root: %s -> conid=%s", sym, conid)
                     return int(conid)
         except Exception as exc:
             logger.debug("futures root %s: %s", sym, exc)
@@ -230,6 +237,8 @@ def get_futures_prices(client: IBKRClient, base_conid: int, fut_months: list[str
     """
     Resolve individual monthly futures conids via /iserver/secdef/info then snapshot them.
     Tries the futures root conid first; falls back to index conid.
+    Selects the FESX contract (multiplier=10) over FSXE (multiplier=1) when both
+    are returned for the same month.
     Returns list of { Month, Last, Bid, Ask }.
     """
     fut_root = _resolve_futures_root(client) or base_conid
@@ -237,25 +246,47 @@ def get_futures_prices(client: IBKRClient, base_conid: int, fut_months: list[str
     for month in fut_months[:24]:
         try:
             info = client.get("/iserver/secdef/info", params={
-                "conid": fut_root, "sectype": "FUT", "month": month,
+                "conid": fut_root, "sectype": "FUT", "month": month, "exchange": "EUREX",
             })
             if not (isinstance(info, list) and info):
                 continue
-            fut_conid = info[0].get("conid")
+            contract = next((c for c in info if c.get("tradingClass") == "FESX"), info[0])
+            fut_conid = contract.get("conid")
             if not fut_conid:
                 continue
 
-            snaps = client.snapshot([int(fut_conid)], ["31", "84", "85"])
+            snaps = client.snapshot([int(fut_conid)], ["31", "84", "86"])
             snap  = snaps[0] if isinstance(snaps, list) and snaps else {}
             rows.append({
                 "Month": month,
                 "Last":  _num(snap.get("31")),
                 "Bid":   _num(snap.get("84")),
-                "Ask":   _num(snap.get("85")),
+                "Ask":   _num(snap.get("86")),
             })
         except Exception as exc:
             logger.debug("futures %s: %s", month, exc)
     return rows
+
+
+def select_futures_curve(fut_months: list[str], tenors: list[str],
+                          tenor_months: list[int]) -> list[tuple[str, str]]:
+    """
+    Pair each tenor label with the available contract month closest to
+    (today + tenor_months[i]). Returns [(tenor, month), ...] in tenor order.
+    EUREX only lists quarterly FESX expiries, so several tenors often map
+    to the same month.
+    """
+    if not fut_months:
+        return []
+
+    def month_index(yyyymm: str) -> int:
+        return int(yyyymm[:4]) * 12 + int(yyyymm[4:6]) - 1
+
+    today_idx = month_index(date.today().strftime("%Y%m"))
+    return [
+        (tenor, min(fut_months, key=lambda m: abs(month_index(m) - (today_idx + n))))
+        for tenor, n in zip(tenors, tenor_months)
+    ]
 
 
 # ── Component stocks ───────────────────────────────────────────────────────────
@@ -265,6 +296,12 @@ def resolve_components(client: IBKRClient) -> dict[str, dict]:
     Resolve conids for all SX5E component stocks.
     Returns { symbol: { conid, name } }
     Call once at startup and cache the result.
+
+    A plain symbol search often returns same-ticker stocks from other
+    markets (e.g. "AIR" also matches AAR Corp on NYSE, "MC" also matches
+    Moelis & Co). Disambiguate using the expected primary exchange first,
+    falling back to a company-name match; skip the component entirely if
+    neither yields a confident match (better than showing the wrong stock).
     """
     resolved = {}
     for symbol, name, exchange in SX5E_COMPONENTS:
@@ -272,20 +309,28 @@ def resolve_components(client: IBKRClient) -> dict[str, dict]:
             results = client.search_contract(symbol)
             if not (isinstance(results, list) and results):
                 continue
-            # Prefer STK type matching the primary exchange
-            conid = None
-            for r in results:
-                sections = r.get("sections", [])
-                sec_types = [s.get("secType") for s in sections]
-                if "STK" in sec_types or not sections:
-                    conid = r.get("conid")
-                    if conid:
-                        break
+            stk_results = [
+                r for r in results
+                if "STK" in [s.get("secType") for s in r.get("sections", [])]
+            ]
+
+            conid = next(
+                (r.get("conid") for r in stk_results if r.get("description") == exchange),
+                None,
+            )
             if not conid:
-                conid = results[0].get("conid")
+                name_lo = name.lower()
+                for r in stk_results:
+                    company_lo = (r.get("companyName") or "").lower()
+                    if company_lo and (name_lo in company_lo or company_lo.split()[0] in name_lo):
+                        conid = r.get("conid")
+                        break
+
             if conid:
                 resolved[symbol] = {"conid": int(conid), "name": name}
-                logger.debug("Component %s → conid=%s", symbol, conid)
+                logger.debug("Component %s -> conid=%s", symbol, conid)
+            else:
+                logger.warning("Component %s (%s): no confident listing match, skipping", symbol, name)
         except Exception as exc:
             logger.warning("resolve_components %s: %s", symbol, exc)
     logger.info("Resolved %d/%d components", len(resolved), len(SX5E_COMPONENTS))
@@ -305,7 +350,7 @@ def get_component_spots(client: IBKRClient, components: dict[str, dict]) -> list
     for i in range(0, len(conids), batch_size):
         batch = conids[i:i + batch_size]
         try:
-            snaps = client.snapshot(batch, ["31", "84", "85"])
+            snaps = client.snapshot(batch, ["31", "84", "86"])
             if not isinstance(snaps, list):
                 continue
             for snap in snaps:
@@ -317,7 +362,7 @@ def get_component_spots(client: IBKRClient, components: dict[str, dict]) -> list
                         "Name":   name,
                         "Last":   _num(snap.get("31")),
                         "Bid":    _num(snap.get("84")),
-                        "Ask":    _num(snap.get("85")),
+                        "Ask":    _num(snap.get("86")),
                     })
         except Exception as exc:
             logger.warning("component batch snapshot: %s", exc)
@@ -345,28 +390,42 @@ def get_strikes(client: IBKRClient, conid: int, month: str) -> list[float]:
 
 def get_option_conid(client: IBKRClient, conid: int, month: str, strike: float, right: str) -> int | None:
     """Resolve a single option contract conid via /iserver/secdef/info."""
-    try:
-        result = client.get("/iserver/secdef/info", params={
-            "conid": conid, "sectype": "OPT",
-            "month": month, "strike": strike, "right": right,
-        })
-        if isinstance(result, list) and result:
-            return result[0].get("conid")
-        if isinstance(result, dict):
-            return result.get("conid")
-    except Exception as exc:
-        logger.debug("get_option_conid %s %s %s: %s", month, strike, right, exc)
+    for exchange in ("EUREX", ""):
+        try:
+            result = client.get("/iserver/secdef/info", params={
+                "conid": conid, "sectype": "OPT",
+                "month": month, "strike": strike, "right": right,
+                "exchange": exchange,
+            })
+            if isinstance(result, list) and result:
+                return result[0].get("conid")
+            if isinstance(result, dict):
+                return result.get("conid")
+        except Exception as exc:
+            logger.debug(
+                "get_option_conid %s %s %s exchange=%s: %s",
+                month, strike, right, exchange, exc
+            )
     return None
 
 
-def get_options_table(client: IBKRClient, conid: int, months: list[str], spot: float) -> list[dict]:
+def get_options_table(
+    client: IBKRClient, conid: int, months: list[str], spot: float,
+    delta_step: int = 5,
+) -> list[dict]:
     """
-    Build the options data table (Tab 1).
-    For each of the first 6 months: ATM strike + ~10% OTM call and put.
+    Build the options data table (Tab 1 / Tab 4).
+    For each of the first 6 months: one contract per delta target from
+    -30 to +30 in `delta_step` increments (Puts for negative targets,
+    Calls for positive), with BOTH a Put and a Call resolved at the ATM
+    (0) target. Strikes are picked via a simple OTM% proxy
+    (|delta|/30 * 10%) - the real per-contract Delta from IBKR is
+    returned in the "Delta" column. Conid lookups are deduplicated per
+    unique (strike, right) to bound the number of IBKR calls.
     Returns list of row dicts with raw Greeks (€ translation done in app layer).
     """
     rows = []
-    otm_pct = 0.10
+    delta_targets = list(range(-30, 31, delta_step))
 
     for month in months[:6]:
         strikes = get_strikes(client, conid, month)
@@ -374,45 +433,55 @@ def get_options_table(client: IBKRClient, conid: int, months: list[str], spot: f
             logger.warning("No strikes for month %s", month)
             continue
 
-        targets = {
-            "-30Δ (put)":  (min(strikes, key=lambda k: abs(k - spot * (1 - otm_pct))), "P"),
-            "ATM":         (min(strikes, key=lambda k: abs(k - spot)),                  "C"),
-            "+30Δ (call)": (min(strikes, key=lambda k: abs(k - spot * (1 + otm_pct))), "C"),
-        }
-
-        contracts = []
-        for label, (strike, right) in targets.items():
-            opt_conid = get_option_conid(client, conid, month, strike, right)
-            if opt_conid:
-                contracts.append({"label": label, "strike": strike,
-                                  "right": right, "conid": opt_conid})
+        targets: list[tuple[str, float, str]] = []  # (label, strike, right)
+        for d in delta_targets:
+            otm_pct = abs(d) / 30 * 0.10
+            if d < 0:
+                strike = min(strikes, key=lambda k: abs(k - spot * (1 - otm_pct)))
+                targets.append((f"{d}Δ", strike, "P"))
+            elif d > 0:
+                strike = min(strikes, key=lambda k: abs(k - spot * (1 + otm_pct)))
+                targets.append((f"+{d}Δ", strike, "C"))
             else:
-                logger.warning("No conid for %s %s %s %s", month, label, strike, right)
+                strike = min(strikes, key=lambda k: abs(k - spot))
+                targets.append(("ATM", strike, "P"))
+                targets.append(("ATM", strike, "C"))
 
-        if not contracts:
-            continue
+        # Resolve each unique (strike, right) once, even if several delta
+        # targets collapse onto the same listed strike.
+        conid_map: dict[tuple[float, str], int | None] = {}
+        for _, strike, right in targets:
+            key = (strike, right)
+            if key not in conid_map:
+                conid_map[key] = get_option_conid(client, conid, month, strike, right)
 
+        unique_conids = {c for c in conid_map.values() if c}
         try:
-            snaps    = client.snapshot([c["conid"] for c in contracts], OPTION_FIELDS)
+            snaps = client.snapshot(list(unique_conids), OPTION_FIELDS) if unique_conids else []
             snap_map = {s.get("conid"): s for s in snaps} if isinstance(snaps, list) else {}
         except Exception as exc:
             logger.warning("option snapshot %s: %s", month, exc)
             snap_map = {}
 
-        for c in contracts:
-            s = snap_map.get(c["conid"], {})
+        for label, strike, right in targets:
+            opt_conid = conid_map.get((strike, right))
+            if not opt_conid:
+                logger.warning("No conid for %s %s %s %s", month, label, strike, right)
+                continue
+            s = snap_map.get(opt_conid, {})
             rows.append({
-                "Maturity": month,
-                "Strike":   c["strike"],
-                "Type":     c["label"],
-                "Bid":      _num(s.get("84")),
-                "Ask":      _num(s.get("85")),
-                "Last":     _num(s.get("31")),
-                "IV %":     _num(s.get("7636")),
-                "Delta":    _num(s.get("7308")),
-                "Gamma":    _num(s.get("7309")),
-                "Vega":     _num(s.get("7310")),
-                "Theta":    _num(s.get("7311")),
+                "Maturity":     month,
+                "Delta Target": label,
+                "Strike":       strike,
+                "Type":         "Call" if right == "C" else "Put",
+                "Bid":          _num(s.get("84")),
+                "Ask":          _num(s.get("86")),
+                "Last":         _num(s.get("31")),
+                "IV %":         _num(s.get("7636")),
+                "Delta":        _num(s.get("7308")),
+                "Gamma":        _num(s.get("7309")),
+                "Vega":         _num(s.get("7310")),
+                "Theta":        _num(s.get("7311")),
             })
 
     logger.info("Options table: %d rows for %d months", len(rows), len(months[:6]))
