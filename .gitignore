@@ -178,6 +178,10 @@ dmypy.json
 # pytype static type analyzer
 .pytype/
 
+# Local market-data and analytics artifacts
+data/analytics/
+data/strategies/
+
 # Cython debug symbols
 cython_debug/
 
@@ -213,8 +217,5 @@ tempCodeRunnerFile.py
 marimo/_static/
 marimo/_lsp/
 __marimo__/
-
-# Streamlit
-.streamlit/secrets.toml
 
 .claude/

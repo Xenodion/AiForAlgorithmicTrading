@@ -7,14 +7,19 @@ Open a **CMD** window (not PowerShell, not Git Bash) and run:
 ```
 cd C:\ibkr-gateway
 bin\run.bat root\conf.yaml
+
+mac  : 
+
+cd ~/Desktop/clientportal.gw
+./bin/run.sh root/conf.yaml
 ```
 Keep this window open. You should see:
 ```
-Open https://localhost:5000 to login
+Open https://localhost:5050 to login
 ```
 
 ### Step 2 — Log in
-Open your browser and go to: **https://localhost:5000**
+Open your browser and go to: **https://localhost:5050**
 
 - Accept the SSL warning (click Advanced → Proceed)
 - Enter your IBKR username and password
@@ -22,19 +27,27 @@ Open your browser and go to: **https://localhost:5000**
 - Wait for "Client login succeeds"
 
 ### Step 3 — Run the dashboard
-Open a **PowerShell** terminal in the project folder and run:
-```powershell
-.venv/Scripts/streamlit run app.py
+Open a terminal in the project folder and run the API:
+```bash
+uvicorn src.api.server:app --reload --port 8000
 ```
 
-### Step 4 — Open the dashboard
-Streamlit opens it automatically. If not, go to: **http://localhost:8501**
+### Step 4 — Run the React frontend
+Open a second terminal:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+### Step 5 — Open the dashboard
+Go to: **http://localhost:5173**
 
 ---
 
 ## Notes
 - The gateway CMD window (Step 1) must stay open the whole time
-- The PowerShell terminal (Step 3) must stay open the whole time
+- The API terminal and frontend terminal must stay open the whole time
 - The session stays alive automatically (background keepalive every 55s) — no need to re-login while the app is running
 - IBKR paper trading is **offline on weekends** — options chain and futures will be empty Saturday/Sunday, this is normal
 - If you get a 401 error, your session expired — go back to Step 2 and log in again
@@ -46,6 +59,8 @@ Streamlit opens it automatically. If not, go to: **http://localhost:8501**
 ```powershell
 python -m venv .venv
 .venv/Scripts/pip install -r requirements.txt
+cd frontend
+npm install
 ```
 
 If you add a new dependency:

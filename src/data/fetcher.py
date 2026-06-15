@@ -14,6 +14,14 @@ SPOT_FIELDS   = ["31", "84", "86", "70", "71", "82", "83"]
 #                last  bid   ask   high  low   chg   chg%
 OPTION_FIELDS = ["31", "84", "86", "7308", "7309", "7310", "7311", "7636"]
 #                last  bid   ask   delta  gamma  vega   theta  IV%
+OPTION_DELTA_BUCKETS = [
+    (0.05, 0.18),
+    (0.10, 0.15),
+    (0.15, 0.13),
+    (0.20, 0.11),
+    (0.25, 0.095),
+    (0.30, 0.08),
+]
 
 # Standard term-structure tenors (per teacher spec: ~10 days, 1-18 months,
 # 2 years, 3 years), paired 1:1 with the month offset used to pick the
@@ -409,6 +417,32 @@ def get_option_conid(client: IBKRClient, conid: int, month: str, strike: float, 
     return None
 
 
+def _option_mid_and_quality(bid: float | None, ask: float | None,
+                            last: float | None) -> tuple[float | None, float | None, str]:
+    if bid is not None and ask is not None and bid > 0 and ask > 0 and ask >= bid:
+        mid = (bid + ask) / 2.0
+        spread = ask - bid
+        spread_pct = spread / mid if mid > 0 else 1.0
+        if spread_pct <= 0.05:
+            quality = "tight"
+        elif spread_pct <= 0.15:
+            quality = "wide"
+        else:
+            quality = "very wide"
+        return round(mid, 4), round(spread, 4), quality
+    if last is not None and last > 0:
+        return last, None, "last only"
+    return None, None, "empty"
+
+
+def _option_label(right: str, target: float | None, strike: float, atm_strike: float) -> str:
+    if target is None:
+        return "ATM call" if right == "C" else "ATM put"
+    prefix = "+" if right == "C" else "-"
+    side = "call" if right == "C" else "put"
+    return f"{prefix}{int(target * 100)}Δ {side}"
+
+
 def get_options_table(
     client: IBKRClient, conid: int, months: list[str], spot: float,
     delta_step: int = 5,
@@ -433,24 +467,26 @@ def get_options_table(
             logger.warning("No strikes for month %s", month)
             continue
 
-        targets: list[tuple[str, float, str]] = []  # (label, strike, right)
+        atm_strike = min(strikes, key=lambda k: abs(k - spot))
+        targets: list[dict] = []
         for d in delta_targets:
             otm_pct = abs(d) / 30 * 0.10
             if d < 0:
                 strike = min(strikes, key=lambda k: abs(k - spot * (1 - otm_pct)))
-                targets.append((f"{d}Δ", strike, "P"))
+                targets.append({"strike": strike, "right": "P", "target": abs(d) / 100})
             elif d > 0:
                 strike = min(strikes, key=lambda k: abs(k - spot * (1 + otm_pct)))
-                targets.append((f"+{d}Δ", strike, "C"))
+                targets.append({"strike": strike, "right": "C", "target": d / 100})
             else:
-                strike = min(strikes, key=lambda k: abs(k - spot))
-                targets.append(("ATM", strike, "P"))
-                targets.append(("ATM", strike, "C"))
+                targets.append({"strike": atm_strike, "right": "P", "target": None})
+                targets.append({"strike": atm_strike, "right": "C", "target": None})
 
         # Resolve each unique (strike, right) once, even if several delta
         # targets collapse onto the same listed strike.
         conid_map: dict[tuple[float, str], int | None] = {}
-        for _, strike, right in targets:
+        for contract in targets:
+            strike = contract["strike"]
+            right = contract["right"]
             key = (strike, right)
             if key not in conid_map:
                 conid_map[key] = get_option_conid(client, conid, month, strike, right)
@@ -463,25 +499,36 @@ def get_options_table(
             logger.warning("option snapshot %s: %s", month, exc)
             snap_map = {}
 
-        for label, strike, right in targets:
+        for contract in targets:
+            strike = contract["strike"]
+            right = contract["right"]
             opt_conid = conid_map.get((strike, right))
             if not opt_conid:
-                logger.warning("No conid for %s %s %s %s", month, label, strike, right)
+                logger.warning("No conid for %s %s %s", month, strike, right)
                 continue
             s = snap_map.get(opt_conid, {})
+            bid = _num(s.get("84"))
+            ask = _num(s.get("86"))
+            last = _num(s.get("31"))
+            mid, spread, quality = _option_mid_and_quality(bid, ask, last)
             rows.append({
-                "Maturity":     month,
-                "Delta Target": label,
-                "Strike":       strike,
-                "Type":         "Call" if right == "C" else "Put",
-                "Bid":          _num(s.get("84")),
-                "Ask":          _num(s.get("86")),
-                "Last":         _num(s.get("31")),
-                "IV %":         _num(s.get("7636")),
-                "Delta":        _num(s.get("7308")),
-                "Gamma":        _num(s.get("7309")),
-                "Vega":         _num(s.get("7310")),
-                "Theta":        _num(s.get("7311")),
+                "Maturity": month,
+                "Strike": strike,
+                "Type": "Call" if right == "C" else "Put",
+                "Right": right,
+                "Delta Target": contract["target"],
+                "Label": _option_label(right, contract["target"], strike, atm_strike),
+                "Bid": bid,
+                "Ask": ask,
+                "Last": last,
+                "Mid": mid,
+                "Spread": spread,
+                "Quote Quality": quality,
+                "IV %": _num(s.get("7636")),
+                "Delta": _num(s.get("7308")),
+                "Gamma": _num(s.get("7309")),
+                "Vega": _num(s.get("7310")),
+                "Theta": _num(s.get("7311")),
             })
 
     logger.info("Options table: %d rows for %d months", len(rows), len(months[:6]))

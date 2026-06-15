@@ -8,7 +8,7 @@
 #   4. Keep the gateway process running while using this project
 
 connection:
-  base_url: "https://localhost:5000/v1/api"
+  base_url: "https://localhost:5050/v1/api"
   verify_ssl: false       # Gateway uses a self-signed cert — safe to disable locally
   timeout_seconds: 10
 
