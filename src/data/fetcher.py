@@ -388,8 +388,26 @@ def get_strikes(client: IBKRClient, conid: int, month: str) -> list[float]:
     return []
 
 
+def _third_friday(month: str) -> str:
+    """YYYYMMDD of the 3rd Friday of `month` (YYYYMM) - EUREX's standard
+    monthly index-option expiry."""
+    year, mon = int(month[:4]), int(month[4:6])
+    first = date(year, mon, 1)
+    first_friday = 1 + (4 - first.weekday()) % 7
+    return date(year, mon, first_friday + 14).strftime("%Y%m%d")
+
+
 def get_option_conid(client: IBKRClient, conid: int, month: str, strike: float, right: str) -> int | None:
-    """Resolve a single option contract conid via /iserver/secdef/info."""
+    """
+    Resolve a single option contract conid via /iserver/secdef/info.
+    For a given (month, strike, right), IBKR often returns several series
+    expiring within that month - daily "OEXP" contracts (some already
+    expired) plus weekly/monthly "OESX" contracts. Pick the standard
+    monthly OESX contract (3rd Friday); fall back to the
+    latest-expiring OESX series, then to the first result, if no exact
+    monthly match is found.
+    """
+    target_expiry = _third_friday(month)
     for exchange in ("EUREX", ""):
         try:
             result = client.get("/iserver/secdef/info", params={
@@ -397,10 +415,20 @@ def get_option_conid(client: IBKRClient, conid: int, month: str, strike: float, 
                 "month": month, "strike": strike, "right": right,
                 "exchange": exchange,
             })
-            if isinstance(result, list) and result:
-                return result[0].get("conid")
             if isinstance(result, dict):
                 return result.get("conid")
+            if isinstance(result, list) and result:
+                monthly = next(
+                    (c for c in result if c.get("tradingClass") == "OESX"
+                     and c.get("maturityDate") == target_expiry),
+                    None,
+                )
+                if monthly:
+                    return monthly.get("conid")
+                oesx = [c for c in result if c.get("tradingClass") == "OESX"]
+                if oesx:
+                    return max(oesx, key=lambda c: c.get("maturityDate", "")).get("conid")
+                return result[0].get("conid")
         except Exception as exc:
             logger.debug(
                 "get_option_conid %s %s %s exchange=%s: %s",
