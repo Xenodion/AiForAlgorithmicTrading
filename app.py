@@ -23,7 +23,7 @@ from src.data.fetcher import (
     get_price_history, get_strikes, get_option_conid,
     select_futures_curve, FUTURES_TENORS, FUTURES_TENOR_MONTHS,
 )
-from src.analytics.pricer import black_scholes, greeks, scenario_grid, implied_volatility, pnl_approximation
+from src.analytics.pricer import black_scholes, greeks, scenario_grid, implied_volatility, pnl_approximation, portfolio_scenario_grid
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
@@ -339,7 +339,10 @@ with tab1:
         "- **Greeks (Δ, Γ, ν, θ)**: sensitivities of the option price to "
         "spot, and their **(€)** counterparts converted using the "
         "Multiplier above — e.g. Delta (€) ≈ how many € the position gains "
-        "per 1-point move in the index"
+        "per 1-point move in the index\n"
+        "- **Root-Time Vega**: Vega ÷ √T — since raw Vega grows with √T, "
+        "this normalizes vega across maturities so you can compare vol "
+        "exposure between near- and far-dated strikes on equal footing"
     )
     spot_price = float(last or close or 0)
 
@@ -365,12 +368,19 @@ with tab1:
                 lambda v: round(v * notional, 4) if v is not None else None
             )
 
+        # Root-Time Vega = Vega / sqrt(T) — normalizes vega across maturities
+        df_opt["Root-Time Vega"] = df_opt.apply(
+            lambda row: round(row["Vega"] / _maturity_years(row["Maturity"]) ** 0.5, 4)
+            if row["Vega"] is not None else None,
+            axis=1,
+        )
+
         col_order = [
             "Maturity", "Delta Target", "Strike", "Type",
             "Bid", "Ask", "Last", "IV %", "IV Source",
             "Delta", "Delta (€)",
             "Gamma", "Gamma (€)",
-            "Vega",  "Vega (€)",
+            "Vega",  "Vega (€)", "Root-Time Vega",
             "Theta", "Theta (€)",
         ]
 
@@ -565,8 +575,8 @@ with tab2:
         "- **Black-Scholes Pricer**: price a single option and see its Greeks\n"
         "- **Scenario Engine**: see how an option's P&L would change under "
         "different spot/volatility moves\n"
-        "- **Portfolio Builder**: combine several option positions and see "
-        "their combined (aggregated) Greeks and an estimated P&L"
+        "- **Portfolio Builder**: combine **option and index** positions and "
+        "see their combined (aggregated) Greeks and an estimated P&L"
     )
 
     spot_now = get_spot(client, INDEX["conid"])
@@ -695,11 +705,22 @@ with tab2:
     # ── Portfolio Builder ──────────────────────────────────────────────────────
     st.subheader("📋 Portfolio Builder")
     explain(
-        "Build a small **portfolio of option positions** by hand and see "
-        "how their risk adds up.\n\n"
-        "- Fill in the form (type, strike, maturity, vol, quantity, "
-        "multiplier) and click **➕ Add to portfolio** — each click adds one "
-        "position to the table below\n"
+        "Build a small **portfolio of option and index positions** by hand "
+        "and see how their risk adds up.\n\n"
+        "- **Position type — Option**: a call or put (type, strike, "
+        "maturity, vol, quantity, multiplier)\n"
+        "- **Position type — Index**: a position in the underlying index "
+        "itself (e.g. a future) at today's spot price — its Greeks are "
+        "fixed at Δ=1, Γ=ν=θ=0 (value moves 1-for-1 with the index, no "
+        "convexity/vol/time sensitivity). Combining options with an index "
+        "position is how you'd **delta-hedge** — e.g. a negative Qty "
+        "(short index) to offset a long call's Δ\n"
+        "- **ν/√T** and **$ ν/√T**: Vega normalized by √T (always 0 for "
+        "Index positions) — lets you compare vega risk between positions "
+        "with different maturities on equal footing, since raw Vega grows "
+        "with √T\n"
+        "- Fill in the form and click **➕ Add to portfolio** — each click "
+        "adds one position to the table below\n"
         "- **Aggregated portfolio Greeks**: the sum of every position's € "
         "Greeks — this tells you the portfolio's overall sensitivity to "
         "spot (Δ), to changes in Δ itself (Γ), to volatility (ν), and to "
@@ -714,40 +735,74 @@ with tab2:
     if "portfolio" not in st.session_state:
         st.session_state.portfolio = []
 
+    pos_kind = st.radio("Position type", ["Option", "Index"], horizontal=True, key="pos_kind")
+
     with st.form("add_position"):
-        pc1, pc2, pc3, pc4, pc5, pc6, pc7 = st.columns(7)
-        p_label = pc1.text_input("Label",    value="ESTX50 ATM C")
-        p_type  = pc2.selectbox("Type",      ["call", "put"])
-        p_K     = pc3.number_input("Strike K",    value=float(round(S_live / 100) * 100), step=50.0)
-        p_T     = pc4.number_input("T (yr)",  value=0.25, step=0.05, format="%.2f")
-        p_sigma = pc5.number_input("σ (%)",   value=20.0, step=1.0) / 100
-        p_qty   = pc6.number_input("Qty",     value=1, step=1)
-        p_mult  = pc7.number_input("Mult",    value=10, step=1)
-        add     = st.form_submit_button("➕ Add to portfolio")
+        if pos_kind == "Option":
+            pc1, pc2, pc3, pc4, pc5, pc6, pc7 = st.columns(7)
+            p_label = pc1.text_input("Label",    value="ESTX50 ATM C")
+            p_type  = pc2.selectbox("Type",      ["call", "put"])
+            p_K     = pc3.number_input("Strike K",    value=float(round(S_live / 100) * 100), step=50.0)
+            p_T     = pc4.number_input("T (yr)",  value=0.25, step=0.05, format="%.2f")
+            p_sigma = pc5.number_input("σ (%)",   value=20.0, step=1.0) / 100
+            p_qty   = pc6.number_input("Qty",     value=1, step=1)
+            p_mult  = pc7.number_input("Mult",    value=10, step=1)
+        else:
+            pc1, pc2, pc3 = st.columns(3)
+            p_label = pc1.text_input("Label", value=f"{INDEX['name']} Index")
+            p_qty   = pc2.number_input("Qty",  value=1, step=1, help="Negative = short (e.g. for delta-hedging)")
+            p_mult  = pc3.number_input("Mult", value=10, step=1)
+        add = st.form_submit_button("➕ Add to portfolio")
 
     if add:
-        price = black_scholes(bs_S, p_K, p_T, bs_r, p_sigma, p_type)
-        g     = greeks(bs_S, p_K, p_T, bs_r, p_sigma, p_type, p_mult)
-        st.session_state.portfolio.append({
-            "Label":  p_label,
-            "Type":   p_type,
-            "Strike": p_K,
-            "T":      p_T,
-            "σ":      f"{p_sigma:.1%}",
-            "Qty":    p_qty,
-            "Mult":   p_mult,
-            "Price":  round(price, 4),
-            "Δ":      g["delta"],
-            "Γ":      g["gamma"],
-            "ν":      g["vega"],
-            "θ":      g["theta"],
-            "$ Δ":    g["dollar_delta"] * p_qty,
-            "$ Γ":    g["dollar_gamma"] * p_qty,
-            "$ ν":    g["dollar_vega"]  * p_qty,
-            "$ θ":    g["dollar_theta"] * p_qty,
-            "_S":     bs_S, "_K": p_K, "_T": p_T,
-            "_r":     bs_r, "_sigma": p_sigma, "_type": p_type, "_mult": p_mult,
-        })
+        if pos_kind == "Option":
+            price = black_scholes(bs_S, p_K, p_T, bs_r, p_sigma, p_type)
+            g     = greeks(bs_S, p_K, p_T, bs_r, p_sigma, p_type, p_mult)
+            st.session_state.portfolio.append({
+                "Label":  p_label,
+                "Type":   p_type,
+                "Strike": p_K,
+                "T":      p_T,
+                "σ":      f"{p_sigma:.1%}",
+                "Qty":    p_qty,
+                "Mult":   p_mult,
+                "Price":  round(price, 4),
+                "Δ":      g["delta"],
+                "Γ":      g["gamma"],
+                "ν":      g["vega"],
+                "θ":      g["theta"],
+                "ν/√T":   round(g["vega"] / p_T ** 0.5, 4),
+                "$ Δ":    g["dollar_delta"] * p_qty,
+                "$ Γ":    g["dollar_gamma"] * p_qty,
+                "$ ν":    g["dollar_vega"]  * p_qty,
+                "$ θ":    g["dollar_theta"] * p_qty,
+                "$ ν/√T": round(g["dollar_vega"] / p_T ** 0.5, 2) * p_qty,
+                "_S":     bs_S, "_K": p_K, "_T": p_T,
+                "_r":     bs_r, "_sigma": p_sigma, "_type": p_type, "_mult": p_mult,
+            })
+        else:
+            st.session_state.portfolio.append({
+                "Label":  p_label,
+                "Type":   "Index",
+                "Strike": "—",
+                "T":      "—",
+                "σ":      "—",
+                "Qty":    p_qty,
+                "Mult":   p_mult,
+                "Price":  round(S_live, 4),
+                "Δ":      1.0,
+                "Γ":      0.0,
+                "ν":      0.0,
+                "θ":      0.0,
+                "ν/√T":   0.0,
+                "$ Δ":    1.0 * p_mult * p_qty,
+                "$ Γ":    0.0,
+                "$ ν":    0.0,
+                "$ θ":    0.0,
+                "$ ν/√T": 0.0,
+                "_S":     S_live, "_K": None, "_T": None,
+                "_r":     bs_r, "_sigma": None, "_type": "index", "_mult": p_mult,
+            })
 
     if st.session_state.portfolio:
         if st.button("🗑️ Clear portfolio"):
@@ -756,7 +811,7 @@ with tab2:
 
         df_port = pd.DataFrame(st.session_state.portfolio)
         display_cols = ["Label","Type","Strike","T","σ","Qty","Mult","Price",
-                        "Δ","Γ","ν","θ","$ Δ","$ Γ","$ ν","$ θ"]
+                        "Δ","Γ","ν","θ","ν/√T","$ Δ","$ Γ","$ ν","$ θ","$ ν/√T"]
         st.dataframe(df_port[display_cols], use_container_width=True, hide_index=True)
 
         # Aggregate Greeks
@@ -782,6 +837,60 @@ with tab2:
             for row in st.session_state.portfolio
         )
         st.metric("Estimated portfolio P&L", f"€ {total_pnl:+,.2f}")
+
+        # Portfolio-wide shock grid (full repricing)
+        st.markdown("**Portfolio-wide shock grid (full repricing)**")
+        explain(
+            "Same idea as the single-option Scenario Engine above, but applied "
+            "to the **whole portfolio at once**: for every (spot shock, vol "
+            "shock) combination, every position is fully repriced with "
+            "Black-Scholes (Index positions just move 1-for-1 with the spot) "
+            "and the resulting P&Ls are summed.\n\n"
+            "- **P&L (full)**: sum of every position's exact repriced P&L\n"
+            "- **P&L (Greeks)**: sum of every position's Greeks-based local "
+            "approximation (same formula as the slider above, applied per "
+            "shock)\n"
+            "- **Error**: difference between the two — for **Index** "
+            "positions this is always 0, since their payoff is exactly "
+            "linear and the Greeks approximation is exact\n\n"
+            "The reference spot ('today') is **S₀** from the Black-Scholes "
+            "Pricer at the top of this tab, matching the single-option "
+            "Scenario Engine above."
+        )
+
+        port_spot_shocks = [-0.15, -0.10, -0.05, 0.0, +0.05, +0.10, +0.15]
+        port_vol_shocks  = [-0.10, -0.05, 0.0, +0.05, +0.10]
+
+        port_scenarios = portfolio_scenario_grid(
+            st.session_state.portfolio, S=bs_S,
+            spot_shocks=port_spot_shocks, vol_shocks=port_vol_shocks,
+        )
+        df_port_scen = pd.DataFrame(port_scenarios)
+
+        port_pnl_grid = df_port_scen["P&L (full)"].to_numpy().reshape(len(port_spot_shocks), len(port_vol_shocks))
+        fig_port_heat = go.Figure(go.Heatmap(
+            z=port_pnl_grid,
+            x=[f"{v:+.0%}" for v in port_vol_shocks],
+            y=[f"{s:+.0%}" for s in port_spot_shocks],
+            colorscale="RdYlGn",
+            zmid=0,
+            text=port_pnl_grid,
+            texttemplate="%{text:+,.0f}",
+            textfont=dict(size=11),
+            colorbar=dict(title="P&L (€)"),
+            hovertemplate="Spot shock %{y}, Vol shock %{x}<br>Portfolio P&L = %{z:+,.2f} €<extra></extra>",
+        ))
+        fig_port_heat.update_layout(
+            height=400,
+            template="plotly_dark",
+            margin=dict(l=0, r=0, t=10, b=0),
+            xaxis_title="Vol shock (Δσ, percentage points)",
+            yaxis_title="Spot shock (%)",
+        )
+        st.plotly_chart(fig_port_heat, use_container_width=True)
+
+        with st.expander("Full portfolio scenario table"):
+            st.dataframe(df_port_scen, use_container_width=True, hide_index=True)
     else:
         st.info("Add positions above to build your portfolio.")
 
@@ -827,9 +936,12 @@ with tab2:
 
                 pnl_full = pnl_approx = 0.0
                 for pos in st.session_state.portfolio:
-                    T_i     = pos["_T"] + days_ago / 365
-                    V_i     = black_scholes(S_i,    pos["_K"], T_i,       pos["_r"], pos["_sigma"], pos["_type"])
-                    V_today = black_scholes(S_live, pos["_K"], pos["_T"], pos["_r"], pos["_sigma"], pos["_type"])
+                    if pos["_type"] == "index":
+                        V_i, V_today = S_i, S_live
+                    else:
+                        T_i     = pos["_T"] + days_ago / 365
+                        V_i     = black_scholes(S_i,    pos["_K"], T_i,       pos["_r"], pos["_sigma"], pos["_type"])
+                        V_today = black_scholes(S_live, pos["_K"], pos["_T"], pos["_r"], pos["_sigma"], pos["_type"])
                     pnl_full += (V_today - V_i) * pos["Qty"] * pos["Mult"]
                     pnl_approx += pnl_approximation(
                         pos["Δ"], pos["Γ"], pos["ν"], pos["θ"],

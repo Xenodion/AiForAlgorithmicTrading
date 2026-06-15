@@ -138,6 +138,43 @@ def pnl_approximation(delta: float, gamma: float, vega: float, theta: float,
     return round(pnl, 2)
 
 
+def portfolio_scenario_grid(portfolio: list[dict], S: float,
+                             spot_shocks: list[float], vol_shocks: list[float]) -> list[dict]:
+    """
+    Full repricing of a whole portfolio under a grid of (spot shock, vol shock)
+    scenarios, sharing a single reference spot `S` ("today") across all
+    positions. Each position dict must carry `_K, _T, _r, _sigma, _type`
+    (pricer inputs; `_type == "index"` for a linear underlying position),
+    `Qty`, `Mult`, and stored Greeks `Δ, Γ, ν, θ` (used for the approx).
+    Returns list of { Spot shock, Vol shock, P&L (full), P&L (Greeks), Error }.
+    """
+    rows = []
+    for ds_pct in spot_shocks:
+        S_new = S * (1 + ds_pct)
+        for dv in vol_shocks:
+            pnl_full = pnl_approx = 0.0
+            for pos in portfolio:
+                if pos["_type"] == "index":
+                    base_price, new_price = S, S_new
+                else:
+                    sigma_new  = max(pos["_sigma"] + dv, 1e-6)
+                    base_price = black_scholes(S,     pos["_K"], pos["_T"], pos["_r"], pos["_sigma"], pos["_type"])
+                    new_price  = black_scholes(S_new, pos["_K"], pos["_T"], pos["_r"], sigma_new,      pos["_type"])
+                pnl_full += (new_price - base_price) * pos["Qty"] * pos["Mult"]
+                pnl_approx += pnl_approximation(
+                    pos["Δ"], pos["Γ"], pos["ν"], pos["θ"],
+                    dS=S * ds_pct, d_sigma=dv, dt=0, multiplier=pos["Mult"],
+                ) * pos["Qty"]
+            rows.append({
+                "Spot shock":   f"{ds_pct:+.0%}",
+                "Vol shock":    f"{dv:+.0%}",
+                "P&L (full)":   round(pnl_full, 2),
+                "P&L (Greeks)": round(pnl_approx, 2),
+                "Error":        round(pnl_full - pnl_approx, 2),
+            })
+    return rows
+
+
 def scenario_grid(S: float, K: float, T: float, r: float, sigma: float,
                   option_type: str, multiplier: float,
                   spot_shocks: list[float], vol_shocks: list[float]) -> list[dict]:
