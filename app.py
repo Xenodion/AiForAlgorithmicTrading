@@ -376,7 +376,7 @@ with tab1:
         )
 
         col_order = [
-            "Maturity", "Delta Target", "Strike", "Type",
+            "Maturity", "Delta Target Label", "Strike", "Type",
             "Bid", "Ask", "Last", "IV %", "IV Source",
             "Delta", "Delta (€)",
             "Gamma", "Gamma (€)",
@@ -398,7 +398,7 @@ with tab1:
                 "Filter Type", options=type_options, default=type_options,
             )
         with f_delta:
-            delta_options = sorted(df_opt["Delta Target"].dropna().unique(), key=_delta_sort_key)
+            delta_options = sorted(df_opt["Delta Target Label"].dropna().unique(), key=_delta_sort_key)
             selected_deltas = st.multiselect(
                 "Filter Delta Target", options=delta_options, default=delta_options,
             )
@@ -406,7 +406,7 @@ with tab1:
         df_display = df_opt[
             df_opt["Maturity"].isin(selected_mats)
             & df_opt["Type"].isin(selected_types)
-            & df_opt["Delta Target"].isin(selected_deltas)
+            & df_opt["Delta Target Label"].isin(selected_deltas)
         ].copy()
         df_display["Maturity"] = df_display["Maturity"].map(_fmt_maturity)
 
@@ -432,7 +432,7 @@ with tab1:
             "surface lets you see both at once. For a more detailed version "
             "with smile and term-structure charts, see the **Surface** tab."
         )
-        surf = df_opt[df_opt["IV %"].notna() & df_opt["Delta Target"].notna()].copy()
+        surf = df_opt[df_opt["IV %"].notna() & df_opt["Delta Target Label"].notna()].copy()
         surf, dropped_mats = filter_liquid_maturities(surf)
         if dropped_mats:
             st.caption(
@@ -442,7 +442,7 @@ with tab1:
 
         if not surf.empty:
             pivot = surf.pivot_table(
-                values="IV %", index="Delta Target", columns="Maturity", aggfunc="mean"
+                values="IV %", index="Delta Target Label", columns="Maturity", aggfunc="mean"
             )
             pivot = pivot.reindex(sorted(pivot.index, key=_delta_sort_key))
             fig = go.Figure(go.Surface(
@@ -1264,16 +1264,16 @@ with tab4:
             )
 
             surface_points = df_surface[
-                df_surface["Delta Target"].notna() & df_surface["IV %"].notna()
+                df_surface["Delta Target Label"].notna() & df_surface["IV %"].notna()
             ].copy()
 
             if (
                 surface_points["Maturity"].nunique() >= 2
-                and surface_points["Delta Target"].nunique() >= 2
+                and surface_points["Delta Target Label"].nunique() >= 2
             ):
                 pivot_surface = surface_points.pivot_table(
                     values="IV %",
-                    index="Delta Target",
+                    index="Delta Target Label",
                     columns="Maturity",
                     aggfunc="mean",
                 )
@@ -1298,7 +1298,7 @@ with tab4:
                 fig_surface = go.Figure(
                     go.Scatter3d(
                         x=surface_points["Maturity"],
-                        y=surface_points["Delta Target"],
+                        y=surface_points["Delta Target Label"],
                         z=surface_points["IV %"],
                         mode="markers",
                         marker=dict(

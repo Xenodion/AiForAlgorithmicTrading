@@ -1,7 +1,7 @@
 # AI for Algorithmic Trading — Volatility Infrastructure
 
-Streamlit dashboard connected live to IBKR Client Portal REST API.
-Displays real-time data, Greeks, scenario engine, and vol surface for the Euro STOXX 50.
+React dashboard and FastAPI backend connected live to the IBKR Client Portal REST API.
+Displays real-time data, Greeks, scenario engine, backtests, and vol surface analytics for the Euro STOXX 50.
 
 ---
 
@@ -29,8 +29,12 @@ python -m venv .venv
 # 3. Activate it
 .venv\Scripts\Activate.ps1
 
-# 4. Install dependencies
+# 4. Install Python dependencies
 pip install -r requirements.txt
+
+# 5. Install frontend dependencies
+cd frontend
+npm install
 ```
 
 > On Windows you may need to run `Set-ExecutionPolicy RemoteSigned -Scope CurrentUser` once to allow .ps1 activation.
@@ -48,8 +52,10 @@ configs/broker.yaml
 Default content (should already work if gateway runs on localhost):
 
 ```yaml
-base_url: https://localhost:5000
-verify_ssl: false
+connection:
+  base_url: "https://localhost:5050/v1/api"
+  verify_ssl: false
+  timeout_seconds: 10
 ```
 
 ---
@@ -67,7 +73,7 @@ bin\run.bat root\conf.yaml
 
 Keep this window open. Wait until you see:
 ```
-Open https://localhost:5000 to login
+Open https://localhost:5050 to login
 ```
 
 > If you get `'java' is not recognized`, set your Java path in `run.bat`:
@@ -78,7 +84,7 @@ Open https://localhost:5000 to login
 
 ### Step 2 — Log in to the gateway
 
-Open your browser → **https://localhost:5000**
+Open your browser → **https://localhost:5050**
 
 - Accept the SSL warning (Advanced → Proceed)
 - Log in with your IBKR credentials
@@ -101,28 +107,39 @@ a spot snapshot with `last`/`close`/`chg`, and a market-data availability code.
 > `availability=D` (Delayed) is **normal** for paper trading accounts — `R`
 > means real-time. A proof record is written to `data/raw/`.
 
-### Step 4 — Launch the dashboard
+### Step 4 — Launch the API
 
 ```powershell
-.venv\Scripts\streamlit run app.py
+uvicorn src.api.server:app --reload --port 8000
 ```
 
-### Step 5 — Open the dashboard
+### Step 5 — Launch the React frontend
 
-Goes to **http://localhost:8501** automatically. If not, open it manually.
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+### Step 6 — Open the dashboard
+
+Open **http://localhost:5173**.
 
 ---
 
 ## Project structure
 
 ```
-app.py                  # Main Streamlit app (4 tabs)
 configs/
   broker.yaml           # IBKR gateway URL
   universe.yaml         # Monitored underlyings, option/futures tenors
+frontend/
+  src/                  # React dashboard
 scripts/
   bootstrap.py          # Health-check / connectivity smoke test
 src/
+  api/
+    server.py           # FastAPI backend for the React app
   connectivity/
     session.py          # IBKRClient — REST wrapper + auth
   data/
@@ -134,19 +151,23 @@ data/
 docs/
   START.md              # Short startup cheatsheet
   roadmap.md            # 16-step project roadmap
+  FINAL_PLATFORM_BLUEPRINT.md # Final architecture, product, and Finary-inspired UI target
+  RUNBOOK.md            # Operations diagnosis guide
+  RELEASE_CHECKLIST.md  # Demo and handoff checklist
 requirements.txt
 ```
 
 ---
 
-## Tabs
+## Dashboard Areas
 
 | Tab | Content |
 |-----|---------|
 | **Données** | Live spot, 3Y price history, futures curve, options chain with Greeks, vol surface, all 50 SX5E components |
 | **Risques** | Black-Scholes pricer, scenario P&L grid (spot × vol), portfolio builder with Greek aggregation |
-| **Ordres** | Order entry / account / positions UI (not yet connected to order routing) |
+| **Ordres** | Order ticket validation and dry-run preview, with live routing disabled |
 | **Surface** | 3D implied vol surface, vol smile, ATM term structure |
+| **Ops** | Latest run validation, model versions, artifacts, and release health |
 
 ---
 

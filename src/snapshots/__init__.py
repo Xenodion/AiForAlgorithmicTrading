@@ -1,0 +1,2 @@
+"""Market-state snapshot utilities."""
+
