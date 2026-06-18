@@ -37,9 +37,9 @@ const plotLayout = {
 };
 
 const tabs = [
-  { id: 'data', label: 'Marchés', icon: Database },
-  { id: 'risk', label: 'Risque', icon: AlertTriangle },
-  { id: 'orders', label: 'Ordres', icon: Send },
+  { id: 'data', label: 'Markets', icon: Database },
+  { id: 'risk', label: 'Risk', icon: AlertTriangle },
+  { id: 'orders', label: 'Orders', icon: Send },
   { id: 'surface', label: 'Surface', icon: Waves },
   { id: 'operations', label: 'Ops', icon: ShieldCheck },
 ];
@@ -47,209 +47,209 @@ const tabs = [
 const tabMeta = {
   data: {
     eyebrow: 'Market data',
-    title: 'Marchés & chaîne options',
-    description: 'Spot, historiques, futures, forwards, option chain et aperçu surface.',
+    title: 'Markets & option chain',
+    description: 'Spot, history, futures, forwards, option chain and surface preview.',
   },
   risk: {
     eyebrow: 'Risk lab',
-    title: 'Pricing & scénarios',
-    description: 'Prisme P&L, Greeks agrégés, stress spot-vol-time et backtest local.',
+    title: 'Pricing & scenarios',
+    description: 'P&L breakdown, aggregated Greeks, spot-vol-time stress and local backtest.',
   },
   orders: {
     eyebrow: 'Execution safety',
     title: 'Tickets & dry-runs',
-    description: 'Préparation et validation des tickets avec routage réel désactivé.',
+    description: 'Ticket preparation and validation with live routing disabled.',
   },
   surface: {
     eyebrow: 'Volatility model',
-    title: 'Surface implicite',
-    description: 'Surface 3D sur strikes, smile par maturité et term structure ATM.',
+    title: 'Implied surface',
+    description: '3D surface over strikes, smile per maturity and ATM term structure.',
   },
   operations: {
     eyebrow: 'Operations',
-    title: 'Qualité & livraison',
-    description: 'Santé du dernier run, versions de modèles, checks et artefacts.',
+    title: 'Quality & delivery',
+    description: 'Last run health, model versions, checks and artifacts.',
   },
 };
 
 const moduleHelp = {
   'Analytics run': {
-    summary: 'Synthèse du dernier calcul complet options + surface sauvegardé localement.',
+    summary: 'Summary of the last full options + surface calculation saved locally.',
     bullets: [
-      'Permet de voir rapidement si la dernière chaîne options a produit assez de points IV exploitables.',
-      'Les rejets, warnings et violations calendrier donnent le niveau de confiance du run.',
-      'C’est le point de départ pour diagnostiquer une surface vide, trouée ou instable.',
+      'Quickly shows whether the last option chain produced enough usable IV points.',
+      'Rejections, warnings and calendar violations indicate the confidence level of the run.',
+      'Starting point for diagnosing an empty, gappy or unstable surface.',
     ],
   },
   'Index price history': {
-    summary: 'Historique du sous-jacent affiché en chandeliers avec une moyenne mobile de contexte.',
+    summary: 'Underlying price history displayed as candlesticks with a moving average.',
     bullets: [
-      'Sert à replacer la volatilité implicite dans le régime récent du marché.',
-      'La tendance du sous-jacent aide à interpréter les smiles et les scénarios de risque.',
+      'Puts implied volatility in context of the recent market regime.',
+      'The underlying trend helps interpret smiles and risk scenarios.',
     ],
   },
   'Futures curve': {
-    summary: 'Courbe des futures listés sur l’indice, par tenor et échéance EUREX.',
+    summary: 'Curve of listed futures on the index, by tenor and EUREX expiry.',
     bullets: [
-      'Montre le niveau de marché disponible sur les futures.',
-      'Aide à comparer spot, futures et forwards implicites issus des options.',
+      'Shows the market level available on futures.',
+      'Helps compare spot, futures and implied forwards derived from options.',
     ],
   },
   'Forward curve': {
-    summary: 'Forwards implicites reconstruits par parité call-put quand la qualité des quotes le permet.',
+    summary: 'Implied forwards reconstructed via put-call parity when quote quality allows.',
     bullets: [
-      'Source principale pour travailler en log-moneyness plutôt qu’en strike brut.',
-      'Les maturités sans paire exploitable basculent en fallback spot/rate et doivent être surveillées.',
+      'Primary source for working in log-moneyness rather than raw strike.',
+      'Maturities without a usable pair fall back to spot/rate and should be monitored.',
     ],
   },
   'Options chain': {
-    summary: 'Échantillon structuré de la chaîne options par maturité, delta cible, call/put ATM et qualité de quote.',
+    summary: 'Structured sample of the option chain by maturity, delta target, call/put ATM and quote quality.',
     bullets: [
-      'Affiche bid, ask, last, mid, IV, source IV, Greeks et statut de qualité.',
-      'Les colonnes QC indiquent pourquoi une ligne est utilisée ou rejetée pour la surface.',
-      'La granularité delta permet de lire le smile sans parcourir toute la chaîne brute.',
+      'Displays bid, ask, last, mid, IV, IV source, Greeks and quality status.',
+      'QC columns indicate why a row is used or rejected for the surface.',
+      'Delta granularity lets you read the smile without scanning the full raw chain.',
     ],
   },
   'Volatility surface preview': {
-    summary: 'Aperçu rapide de la surface implicite construite depuis les points IV éligibles.',
+    summary: 'Quick preview of the implied surface built from eligible IV points.',
     bullets: [
-      'Permet de détecter immédiatement des trous, ruptures ou zones extrapolées.',
-      'Les points jaunes représentent les observations utilisées autour de la surface interpolée.',
+      'Immediately reveals gaps, breaks or extrapolated zones.',
+      'Yellow dots represent the observations used around the interpolated surface.',
     ],
   },
   'Euro Stoxx components': {
-    summary: 'Vue des composants de l’indice avec les derniers prix disponibles.',
+    summary: 'View of index constituents with the latest available prices.',
     bullets: [
-      'Sert à surveiller le breadth et l’état de récupération des constituants.',
-      'Utile pour vérifier que la connexion market data remonte au-delà de l’indice principal.',
+      'Used to monitor breadth and the retrieval status of constituents.',
+      'Useful to verify that the market data connection reaches beyond the main index.',
     ],
   },
   'Component deep dive': {
-    summary: 'Détail d’un composant sélectionné avec snapshot spot et historique.',
+    summary: 'Detail of a selected constituent with spot snapshot and history.',
     bullets: [
-      'Permet d’inspecter rapidement un titre précis de l’univers.',
-      'Aide à isoler une donnée composant manquante ou incohérente.',
+      'Quickly inspect a specific stock in the universe.',
+      'Helps isolate a missing or inconsistent constituent data point.',
     ],
   },
   'Black-Scholes pricer': {
-    summary: 'Pricer local call/put avec Greeks pour tester une option standardisée.',
+    summary: 'Local call/put pricer with Greeks for testing a standardised option.',
     bullets: [
-      'Permet de simuler prix, delta, gamma, vega et theta à paramètres contrôlés.',
-      'Sert de base pédagogique et de référence pour le portfolio builder.',
+      'Simulates price, delta, gamma, vega and theta at controlled parameters.',
+      'Serves as a pedagogical base and reference for the portfolio builder.',
     ],
   },
   'Scenario engine': {
-    summary: 'Matrice de stress spot × volatilité pour mesurer la sensibilité du P&L.',
+    summary: 'Spot × volatility stress matrix to measure P&L sensitivity.',
     bullets: [
-      'Montre comment une position réagit à différents chocs de marché.',
-      'Aide à repérer les zones où gamma et vega dominent le résultat.',
+      'Shows how a position reacts to different market shocks.',
+      'Highlights zones where gamma and vega dominate the result.',
     ],
   },
   'Portfolio builder': {
-    summary: 'Construction de portefeuille d’options et agrégation des Greeks en euros.',
+    summary: 'Build an option portfolio and aggregate Greeks in euros.',
     bullets: [
-      'Ajoute des positions simulées depuis le pricer.',
-      'Agrège delta, gamma, vega et theta pour lire l’exposition globale.',
+      'Add simulated positions from the pricer.',
+      'Aggregates delta, gamma, vega and theta to read the overall exposure.',
     ],
   },
   'Saved strategies': {
-    summary: 'Bibliothèque locale des stratégies de risque sauvegardées au format parquet.',
+    summary: 'Local library of risk strategies saved in parquet format.',
     bullets: [
-      'Sauvegarde le portefeuille courant avec son nom, sa description et ses positions.',
-      'Permet de recharger une stratégie après redémarrage de l’application.',
-      'Au chargement, les positions sont revalorisées avec le spot courant de l’onglet Risque.',
+      'Saves the current portfolio with its name, description and positions.',
+      'Allows reloading a strategy after restarting the application.',
+      'On load, positions are revalued using the current spot from the Risk tab.',
     ],
   },
   'Local P&L approximation': {
-    summary: 'Approximation locale du P&L via delta, gamma, vega et theta.',
+    summary: 'Local P&L approximation via delta, gamma, vega and theta.',
     bullets: [
-      'Donne une estimation rapide pour un mouvement de spot, de volatilité et de temps.',
-      'Utile pour comparer l’approximation Greeks avec une revalorisation complète.',
+      'Quick estimate for a move in spot, volatility and time.',
+      'Useful to compare the Greeks approximation with a full repricing.',
     ],
   },
   'Portfolio backtest': {
-    summary: 'Backtest local des positions simulées sur spot historique et proxy de volatilité réalisée.',
+    summary: 'Local backtest of simulated positions against historical spot and realised vol proxy.',
     bullets: [
-      'Compare le P&L complet avec une approximation Greeks delta/gamma/vega/theta.',
-      'La vega utilise une volatilité réalisée rolling comme proxy, pas une vraie surface IV historique.',
-      'La décomposition aide à expliquer d’où vient l’écart entre approximation et repricing.',
+      'Compares full P&L with a Greeks delta/gamma/vega/theta approximation.',
+      'Vega uses a rolling realised volatility as a proxy, not a true historical IV surface.',
+      'The decomposition helps explain where the gap between approximation and repricing comes from.',
     ],
   },
   'Account overview': {
-    summary: 'Emplacement réservé aux métriques compte, volontairement non routé en live.',
+    summary: 'Placeholder for account metrics, intentionally not routed live.',
     bullets: [
-      'Le routage broker réel est désactivé par sécurité.',
-      'Ce bloc prépare la future intégration compte sans exposer d’ordre live.',
+      'Live broker routing is disabled for safety.',
+      'This block prepares the future account integration without exposing live orders.',
     ],
   },
   'Order ticket preview': {
-    summary: 'Préparation de ticket avec validation et dry-run sans envoi broker.',
+    summary: 'Ticket preparation with validation and dry-run without broker submission.',
     bullets: [
-      'Valide le sens, la quantité, le type d’ordre et le prix limite.',
-      'Le dry-run crée une trace de prévisualisation sans envoyer d’ordre réel.',
+      'Validates direction, quantity, order type and limit price.',
+      'The dry-run creates a preview trace without sending a real order.',
     ],
   },
   'Open orders': {
-    summary: 'Zone prévue pour les ordres ouverts quand le routage sera activé.',
+    summary: 'Area reserved for open orders when routing is enabled.',
     bullets: [
-      'Reste vide tant que la plateforme fonctionne en mode sécurisé.',
-      'Servira à suivre le statut des ordres live ou paper une fois l’intégration contrôlée.',
+      'Stays empty while the platform runs in safe mode.',
+      'Will track live or paper order status once the integration is controlled.',
     ],
   },
   Positions: {
-    summary: 'Zone prévue pour les positions compte récupérées depuis le broker.',
+    summary: 'Area reserved for account positions retrieved from the broker.',
     bullets: [
-      'Reste vide en mode actuel car les balances et positions ne sont pas branchées.',
-      'Permettra ensuite de rapprocher positions réelles et risques simulés.',
+      'Empty in the current mode as balances and positions are not connected.',
+      'Will allow reconciliation of real positions against simulated risks.',
     ],
   },
   'Run health': {
-    summary: 'Vue de santé globale du dernier run analytique.',
+    summary: 'Global health view of the last analytics run.',
     bullets: [
-      'Condense le statut pass/warn/fail, la fraîcheur et les versions de modèles.',
-      'C’est l’écran à regarder en premier avant de faire confiance aux surfaces.',
+      'Condenses the pass/warn/fail status, freshness and model versions.',
+      'First screen to check before trusting the surfaces.',
     ],
   },
   'Validation checks': {
-    summary: 'Liste des contrôles qualité qui certifient le dernier run.',
+    summary: 'List of quality controls certifying the last run.',
     bullets: [
-      'Chaque carte montre un seuil, une métrique et un statut.',
-      'Les warnings signalent les zones à surveiller sans bloquer toute la plateforme.',
+      'Each card shows a threshold, a metric and a status.',
+      'Warnings flag zones to watch without blocking the whole platform.',
     ],
   },
   Artifacts: {
-    summary: 'Chemins des fichiers JSON générés pour auditer ou rejouer le run.',
+    summary: 'Paths of JSON files generated to audit or replay the run.',
     bullets: [
-      'Permet de retrouver les option rows, diagnostics et surfaces persistés.',
-      'Utile pour comparer deux runs ou investiguer une anomalie.',
+      'Used to find persisted option rows, diagnostics and surfaces.',
+      'Useful to compare two runs or investigate an anomaly.',
     ],
   },
   '3D volatility surface': {
-    summary: 'Surface implicite principale affichée sur maturité, strike et IV.',
+    summary: 'Main implied surface displayed across delta, maturity and IV.',
     bullets: [
-      'Montre la topologie complète de volatilité sur les strikes communs.',
-      'Les points observés aident à distinguer données brutes et interpolation.',
+      'Shows the full volatility topology across delta buckets.',
+      'Observed points help distinguish raw data from interpolation.',
     ],
   },
   'Volatility smile': {
-    summary: 'Coupe de la surface sur une maturité donnée.',
+    summary: 'Cross-section of the surface for a given maturity.',
     bullets: [
-      'Permet de lire le smile/skew plus précisément que dans la vue 3D.',
-      'Utile pour identifier une anomalie locale sur une échéance.',
+      'Read the smile/skew more precisely than in the 3D view.',
+      'Useful to identify a local anomaly on one expiry.',
     ],
   },
   'ATM term structure': {
-    summary: 'Structure à terme de l’IV autour de l’ATM.',
+    summary: 'Term structure of IV around the ATM.',
     bullets: [
-      'Réduit le bruit des strikes illiquides en se concentrant sur le point ATM ou proche liquidité.',
-      'Aide à comparer les maturités entre elles sans être perturbé par tout le smile.',
+      'Reduces noise from illiquid strikes by focusing on the ATM or near-liquidity point.',
+      'Helps compare maturities without being distorted by the full smile.',
     ],
   },
   'Surface statistics': {
-    summary: 'Détails de qualité et points utilisés dans la construction de la surface.',
+    summary: 'Quality details and points used in surface construction.',
     bullets: [
-      'Expose accepted/rejected, sources IV, forwards, log-moneyness et variance totale.',
-      'C’est la table d’audit pour comprendre un point précis de la surface.',
+      'Exposes accepted/rejected counts, IV sources, forwards, log-moneyness and total variance.',
+      'The audit table for understanding a specific surface point.',
     ],
   },
 };
@@ -261,55 +261,55 @@ function moduleHelpForTitle(title) {
 }
 
 const chatbotPrompts = {
-  data: ['Comment lire la chaîne options ?', 'Quelle maturité choisir ?', 'Pourquoi regarder les forwards ?'],
-  risk: ['Créer une stratégie prudente', 'Expliquer delta gamma vega', 'Tester un call spread'],
-  orders: ['Préparer un ticket sans risque', 'Pourquoi le routage est bloqué ?', 'Checklist avant un ordre'],
-  surface: ['Interpréter le smile', 'Utiliser la term structure', 'Repérer une surface dangereuse'],
-  operations: ['Diagnostiquer un warning', 'Valider un run', 'Que faire si données vides ?'],
+  data: ['How to read the option chain?', 'Which maturity to choose?', 'Why look at forwards?'],
+  risk: ['Build a conservative strategy', 'Explain delta gamma vega', 'Test a call spread'],
+  orders: ['Prepare a ticket safely', 'Why is routing disabled?', 'Checklist before an order'],
+  surface: ['Interpret the smile', 'Use the term structure', 'Spot a dangerous surface'],
+  operations: ['Diagnose a warning', 'Validate a run', 'What to do with empty data?'],
 };
 
 const assistantIntro =
-  "Salut, je peux t'aider à construire tes premières stratégies de risque pas à pas. Je reste pédagogique: je n'envoie pas d'ordre et je ne donne pas de recommandation d'investissement.";
+  "Hi, I can help you build your first risk strategies step by step. I stay educational: I don't send orders and I don't give investment recommendations.";
 
 function assistantAnswer(input, activeTab) {
   const text = input.toLowerCase();
   const pageHint = {
-    data: "Sur cette page, commence par vérifier spot, maturités liquides, qualité bid/ask et forwards avant de choisir une structure.",
-    risk: "Sur cette page, construis une position simple, regarde les Greeks, puis stresse spot et volatilité avant de complexifier.",
-    orders: "Sur cette page, l'objectif est de préparer et valider un ticket. Le routage réel reste désactivé.",
-    surface: "Sur cette page, utilise la surface pour comprendre où la volatilité est chère ou instable selon strike et maturité.",
-    operations: "Sur cette page, vérifie d'abord que le run est frais, que les points acceptés sont suffisants et que les warnings sont compris.",
+    data: "On this page, start by checking the spot, liquid maturities, bid/ask quality and forwards before choosing a structure.",
+    risk: "On this page, build a simple position, look at the Greeks, then stress spot and volatility before adding complexity.",
+    orders: "On this page, the goal is to prepare and validate a ticket. Live routing stays disabled.",
+    surface: "On this page, use the surface to understand where volatility is expensive or unstable by strike and maturity.",
+    operations: "On this page, first check that the run is fresh, that the accepted points are sufficient and that warnings are understood.",
   }[activeTab];
 
   if (text.includes('delta') || text.includes('gamma') || text.includes('vega') || text.includes('theta') || text.includes('greek')) {
-    return `${pageHint}\n\nLes Greeks servent à transformer une idée en exposition mesurable:\n- Delta: sensibilité au mouvement du sous-jacent.\n- Gamma: vitesse à laquelle le delta change; utile mais peut rendre le P&L nerveux.\n- Vega: sensibilité à la volatilité implicite.\n- Theta: coût ou gain du temps qui passe.\n\nPour débuter, vise une stratégie dont tu peux expliquer le P&L dans 3 scénarios: marché baisse, marché stable, marché monte.`;
+    return `${pageHint}\n\nGreeks turn an idea into a measurable exposure:\n- Delta: sensitivity to the underlying move.\n- Gamma: how fast delta changes; useful but can make P&L volatile.\n- Vega: sensitivity to implied volatility.\n- Theta: cost or gain as time passes.\n\nTo start, aim for a strategy whose P&L you can explain in 3 scenarios: market down, market flat, market up.`;
   }
 
   if (text.includes('call spread') || text.includes('put spread') || text.includes('spread')) {
-    return `Un spread vertical est souvent une bonne première structure car le risque est borné.\n\nExemple de logique:\n1. Tu achètes une option proche de ton scénario.\n2. Tu vends une option plus loin pour réduire le coût.\n3. Tu acceptes de plafonner le gain en échange d'un risque plus lisible.\n\nÀ vérifier dans l'app: prix net, delta total, vega total, perte maximale approximative, puis scénario spot × vol dans l'onglet Risque.`;
+    return `A vertical spread is often a good first structure because the risk is capped.\n\nBasic logic:\n1. Buy an option close to your scenario.\n2. Sell an option further out to reduce the cost.\n3. Accept a capped gain in exchange for a more readable risk.\n\nCheck in the app: net price, total delta, total vega, approximate max loss, then the spot × vol scenario in the Risk tab.`;
   }
 
   if (text.includes('straddle') || text.includes('strangle') || text.includes('volatil')) {
-    return `Une stratégie de volatilité comme straddle/strangle parie surtout sur l'ampleur du mouvement, pas seulement sur la direction.\n\nÀ regarder avant:\n- L'IV ATM est-elle haute ou basse par rapport aux autres maturités ?\n- Le smile montre-t-il une aile très chère ?\n- Le theta est-il acceptable si le marché ne bouge pas ?\n\nPour débuter, compare toujours achat de volatilité et spread borné: le premier est plus pur, le second est souvent plus contrôlable.`;
+    return `A volatility strategy like straddle/strangle bets mainly on the magnitude of the move, not just direction.\n\nCheck before entering:\n- Is the ATM IV high or low vs other maturities?\n- Does the smile show a very expensive wing?\n- Is the theta acceptable if the market doesn't move?\n\nTo start, always compare buying volatility vs a capped spread: the first is purer, the second is often more controllable.`;
   }
 
-  if (text.includes('hedge') || text.includes('couverture') || text.includes('protect') || text.includes('protection')) {
-    return `Pour une première couverture, pense en termes de risque que tu veux réduire.\n\nMéthode simple:\n1. Identifie l'exposition principale: delta, vega ou drawdown.\n2. Choisis une protection qui répond à ce risque: put, put spread, collar ou réduction de taille.\n3. Vérifie le coût: prime payée, theta et perte d'opportunité.\n4. Stress test: baisse de spot, hausse de vol, passage du temps.\n\nUn bon hedge est compréhensible avant d'être sophistiqué.`;
+  if (text.includes('hedge') || text.includes('protect') || text.includes('protection') || text.includes('cover')) {
+    return `For a first hedge, think in terms of the risk you want to reduce.\n\nSimple method:\n1. Identify the main exposure: delta, vega or drawdown.\n2. Choose a protection that addresses it: put, put spread, collar or size reduction.\n3. Check the cost: premium paid, theta and opportunity loss.\n4. Stress test: spot down, vol up, time passing.\n\nA good hedge is understandable before it is sophisticated.`;
   }
 
   if (text.includes('surface') || text.includes('smile') || text.includes('term') || text.includes('iv')) {
-    return `${pageHint}\n\nPour utiliser la surface:\n1. Regarde d'abord l'ATM term structure pour le niveau général de volatilité.\n2. Va ensuite sur le smile pour voir si les puts ou calls sont relativement chers.\n3. Vérifie les diagnostics: points acceptés, rejets, strikes communs, violations calendrier.\n4. Évite de construire une stratégie sur une zone sparse ou last-only.\n\nUne surface aide à choisir où le prix d'option est exploitable, pas à prédire seule la direction.`;
+    return `${pageHint}\n\nHow to use the surface:\n1. Look at the ATM term structure first for the general volatility level.\n2. Then check the smile to see if puts or calls are relatively expensive.\n3. Check the diagnostics: accepted points, rejections, common strikes, calendar violations.\n4. Avoid building a strategy on a sparse or last-only zone.\n\nA surface helps you choose where option pricing is exploitable, not predict direction alone.`;
   }
 
-  if (text.includes('premi') || text.includes('début') || text.includes('prud') || text.includes('strategie') || text.includes('stratégie')) {
-    return `Pour une première stratégie de risque, je te conseille un workflow en 5 étapes:\n\n1. Hypothèse: directionnelle, volatilité, ou couverture ?\n2. Instrument simple: option seule, vertical spread, ou hedge.\n3. Risque borné: définis perte max, taille et maturité.\n4. Greeks: delta pour direction, vega pour IV, theta pour coût du temps.\n5. Scénarios: teste baisse/stable/hausse et vol -/+ avant toute décision.\n\nUn bon premier exercice dans l'app: crée un call spread ou put spread dans Risque, puis compare P&L complet et P&L Greeks.`;
+  if (text.includes('first') || text.includes('start') || text.includes('conserv') || text.includes('strategy') || text.includes('strateg')) {
+    return `For a first risk strategy, I recommend a 5-step workflow:\n\n1. Hypothesis: directional, volatility, or hedge?\n2. Simple instrument: single option, vertical spread, or hedge.\n3. Bounded risk: define max loss, size and maturity.\n4. Greeks: delta for direction, vega for IV, theta for time cost.\n5. Scenarios: test down/flat/up and vol -/+ before any decision.\n\nA good first exercise in the app: create a call spread or put spread in Risk, then compare full P&L vs Greeks P&L.`;
   }
 
-  if (text.includes('warning') || text.includes('erreur') || text.includes('vide') || text.includes('donnée')) {
-    return `Quand un bloc semble suspect, pars de la qualité des données:\n\n1. Onglet Ops: regarde le statut global et les checks warn/fail.\n2. Options chain: vérifie QC Status, QC Reasons et Surface Eligible.\n3. Surface: vérifie common strikes, rejected rows et calendar breaks.\n4. Si beaucoup de last-only ou empty quotes: ne force pas une stratégie sur ces points.\n\nUne stratégie fiable commence par une donnée exploitable.`;
+  if (text.includes('warning') || text.includes('error') || text.includes('empty') || text.includes('data')) {
+    return `When a block looks suspicious, start from data quality:\n\n1. Ops tab: check the global status and warn/fail checks.\n2. Options chain: check QC Status, QC Reasons and Surface Eligible.\n3. Surface: check common strikes, rejected rows and calendar breaks.\n4. If many last-only or empty quotes: don't force a strategy on those points.\n\nA reliable strategy starts with usable data.`;
   }
 
-  return `${pageHint}\n\nJe peux t'aider à formuler une stratégie si tu me donnes trois éléments: ton scénario marché, ton horizon, et le risque que tu veux limiter. Exemple: "je veux une stratégie prudente si l'indice monte légèrement sur 1 mois avec perte bornée".`;
+  return `${pageHint}\n\nI can help you formulate a strategy if you give me three things: your market scenario, your time horizon, and the risk you want to limit. Example: "I want a conservative strategy if the index rises slightly over 1 month with capped loss".`;
 }
 
 function useResource(loader, deps, enabled = true) {
@@ -382,47 +382,24 @@ function uniqueSorted(rows, key) {
   return [...new Set(rows.map((row) => row[key]).filter(Boolean))].sort();
 }
 
-function signedDeltaBucket(row) {
-  const target = row['Delta Target'];
-  if (target === null || target === undefined) return 0;
-  return row.Right === 'P' ? -Number(target) : Number(target);
-}
-
 function isSurfaceIvRow(row) {
-  return Number.isFinite(Number(row['IV %'])) && row['Surface Eligible'] === true;
+  return Number.isFinite(Number(row['IV %']));
 }
 
 function buildSurface(rows) {
-  const points = rows.filter((row) => row.Strike !== null && row.Strike !== undefined && isSurfaceIvRow(row));
+  const points = rows.filter(isSurfaceIvRow);
   const maturities = uniqueSorted(points, 'Maturity');
-  const strikes = [...new Set(points.map((row) => Number(row.Strike)).filter(Number.isFinite))].sort((a, b) => a - b);
-
-  const maturityPoints = Object.fromEntries(
-    maturities.map((maturity) => [
-      maturity,
-      points
-        .filter((row) => row.Maturity === maturity)
-        .map((row) => ({ strike: Number(row.Strike), iv: Number(row['IV %']) }))
-        .sort((a, b) => a.strike - b.strike),
-    ]),
+  const strikes = [...new Set(points.map((row) => Number(row.Strike)).filter(Number.isFinite))].sort(
+    (a, b) => a - b,
   );
-
-  const interpolateIv = (maturity, strike) => {
-    const curve = maturityPoints[maturity] ?? [];
-    const exact = curve.filter((point) => point.strike === strike);
-    if (exact.length) return mean(exact.map((point) => point.iv));
-
-    const lower = [...curve].reverse().find((point) => point.strike < strike);
-    const upper = curve.find((point) => point.strike > strike);
-    if (!lower || !upper) return null;
-
-    const weight = (strike - lower.strike) / (upper.strike - lower.strike);
-    return lower.iv + weight * (upper.iv - lower.iv);
-  };
 
   const z = strikes.map((strike) =>
     maturities.map((maturity) => {
-      return interpolateIv(maturity, strike);
+      const cellRows = points.filter((row) => Number(row.Strike) === strike && row.Maturity === maturity);
+      if (!cellRows.length) return null;
+      const ivValues = cellRows.map((row) => Number(row['IV %'])).filter(Number.isFinite);
+      if (!ivValues.length) return null;
+      return ivValues.reduce((sum, v) => sum + v, 0) / ivValues.length;
     }),
   );
 
@@ -430,12 +407,18 @@ function buildSurface(rows) {
 }
 
 function normalizeSurface(surfaceData, rows) {
-  if (surfaceData?.grid) {
+  const grid = surfaceData?.grid;
+  if (
+    grid?.maturities?.length >= 2 &&
+    grid?.strikes?.length >= 2 &&
+    Array.isArray(grid?.z) &&
+    grid.z.length >= 2
+  ) {
     return {
-      points: surfaceData.ivPoints ?? [],
-      maturities: surfaceData.grid.maturities ?? [],
-      strikes: surfaceData.grid.strikes ?? [],
-      z: surfaceData.grid.z ?? [],
+      points: rows.filter(isSurfaceIvRow),
+      maturities: grid.maturities,
+      strikes: grid.strikes,
+      z: grid.z,
     };
   }
   return buildSurface(rows);
@@ -443,8 +426,12 @@ function normalizeSurface(surfaceData, rows) {
 
 function App() {
   const [activeTab, setActiveTab] = useState('data');
+  const [notional, setNotional] = useState(10);
   const status = useResource(() => apiGet('/api/status'), [], true);
   const bootstrap = useResource(() => apiGet('/api/bootstrap'), [], status.data?.connected !== false);
+  const options = useResource(() => apiGet('/api/options', { notional }), [notional], Boolean(bootstrap.data));
+  const forwards = useResource(() => apiGet('/api/forwards', { notional }), [notional], Boolean(bootstrap.data));
+  const surface = useResource(() => apiGet('/api/surface', { notional }), [notional], Boolean(bootstrap.data));
   const activeMeta = tabMeta[activeTab] ?? tabMeta.data;
 
   return (
@@ -500,7 +487,16 @@ function App() {
           <ConnectionError error={status.data?.error} />
         ) : (
           <>
-            {activeTab === 'data' && <DataView bootstrap={bootstrap.data} />}
+            {activeTab === 'data' && (
+              <DataView
+                bootstrap={bootstrap.data}
+                notional={notional}
+                setNotional={setNotional}
+                options={options}
+                forwards={forwards}
+                surface={surface}
+              />
+            )}
             {activeTab === 'risk' && <RiskView bootstrap={bootstrap.data} />}
             {activeTab === 'orders' && <OrdersView bootstrap={bootstrap.data} />}
             {activeTab === 'surface' && <SurfaceView bootstrap={bootstrap.data} />}
@@ -542,8 +538,8 @@ function StrategyAssistant({ activeTab }) {
         <section className="assistant-panel" aria-label="Strategy assistant">
           <div className="assistant-header">
             <div>
-              <span>Assistant risque</span>
-              <strong>Stratégies guidées</strong>
+              <span>Risk assistant</span>
+              <strong>Guided strategies</strong>
             </div>
             <button className="icon-button" type="button" onClick={() => setOpen(false)} aria-label="Close strategy assistant">
               <X size={17} />
@@ -576,7 +572,7 @@ function StrategyAssistant({ activeTab }) {
             <input
               value={draft}
               onChange={(event) => setDraft(event.target.value)}
-              placeholder="Décris ton idée ou ton risque..."
+              placeholder="Describe your idea or risk..."
             />
             <button className="primary-button" type="submit">
               <Send size={15} />
@@ -863,12 +859,15 @@ function RunCompact({ latestRun }) {
   );
 }
 
-function DataView({ bootstrap }) {
+function DataView({ bootstrap, notional, setNotional, options, forwards, surface }) {
   const [period, setPeriod] = useState('3y');
   const [bar, setBar] = useState('1w');
-  const [notional, setNotional] = useState(10);
   const [selectedComponent, setSelectedComponent] = useState('');
   const [refreshIndex, setRefreshIndex] = useState(0);
+  const [optMaturity, setOptMaturity] = useState('All');
+  const [optType, setOptType] = useState('All');
+  const [optDeltaMin, setOptDeltaMin] = useState(-0.30);
+  const [optDeltaMax, setOptDeltaMax] = useState(0.30);
   const components = bootstrap?.components ?? [];
 
   useEffect(() => {
@@ -881,9 +880,6 @@ function DataView({ bootstrap }) {
   const latestRun = useResource(() => apiGet('/api/runs/latest'), [refreshIndex], true);
   const history = useResource(() => apiGet('/api/history', { period, bar }), [period, bar, refreshIndex], Boolean(bootstrap));
   const futures = useResource(() => apiGet('/api/futures'), [refreshIndex], Boolean(bootstrap));
-  const options = useResource(() => apiGet('/api/options', { notional }), [notional, refreshIndex], Boolean(bootstrap));
-  const forwards = useResource(() => apiGet('/api/forwards', { notional }), [notional, refreshIndex], Boolean(bootstrap));
-  const surface = useResource(() => apiGet('/api/surface', { notional }), [notional, refreshIndex], Boolean(bootstrap));
   const componentRows = useResource(() => apiGet('/api/components'), [refreshIndex], Boolean(bootstrap));
   const componentDetail = useResource(
     () => apiGet(`/api/component/${selectedComponent}`, { period, bar }),
@@ -891,10 +887,25 @@ function DataView({ bootstrap }) {
     Boolean(selectedComponent),
   );
 
-  const refreshAll = () => setRefreshIndex((value) => value + 1);
+  const refreshAll = () => {
+    setRefreshIndex((value) => value + 1);
+    options.reload();
+    forwards.reload();
+    surface.reload();
+  };
   const last = spot.data?.last;
   const close = spot.data?.close;
   const pointChange = last && close ? last - close : null;
+
+  const allOptionRows = options.data ?? [];
+  const optionMaturities = [...new Set(allOptionRows.map((r) => r.Maturity))].sort();
+  const filteredOptionRows = allOptionRows.filter((row) => {
+    if (optMaturity !== 'All' && row.Maturity !== optMaturity) return false;
+    if (optType !== 'All' && row.Type !== optType) return false;
+    const d = Number(row.Delta);
+    if (Number.isFinite(d) && (d < optDeltaMin || d > optDeltaMax)) return false;
+    return true;
+  });
 
   return (
     <div className="view-stack">
@@ -986,13 +997,55 @@ function DataView({ bootstrap }) {
 
       <Panel title="Options chain" icon={Layers3}>
         <Insight>
-          The table samples a richer delta ladder across maturities, with explicit ATM call and ATM put rows. Quote quality helps separate usable markets from sparse prints.
+          All listed strikes within ±10% of spot across 6 maturities — OTM puts below ATM, OTM calls above, both Put and Call at the ATM strike. Delta default is clamped to [−0.30, +0.30].
         </Insight>
         {options.error && <ErrorBlock error={options.error} />}
         {options.loading && !options.data ? (
           <LoadingBlock label="Loading options" />
         ) : (
-          <DataTable rows={options.data ?? []} columns={optionColumns} />
+          <>
+            <div className="control-row">
+              <Field label="Maturity">
+                <select value={optMaturity} onChange={(e) => setOptMaturity(e.target.value)}>
+                  <option value="All">All</option>
+                  {optionMaturities.map((m) => (
+                    <option key={m} value={m}>
+                      {m.slice(0, 4)}-{m.slice(4, 6)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+              <Field label="Type">
+                <Segmented value={optType} options={['All', 'Put', 'Call']} onChange={setOptType} />
+              </Field>
+              <Field label="Δ min">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="-1"
+                  max="1"
+                  value={optDeltaMin}
+                  onChange={(e) => setOptDeltaMin(Number(e.target.value))}
+                />
+              </Field>
+              <Field label="Δ max">
+                <input
+                  type="number"
+                  step="0.01"
+                  min="-1"
+                  max="1"
+                  value={optDeltaMax}
+                  onChange={(e) => setOptDeltaMax(Number(e.target.value))}
+                />
+              </Field>
+              <Field label=" ">
+                <span style={{ fontSize: 12, color: '#7fa99c', alignSelf: 'center' }}>
+                  {filteredOptionRows.length} / {allOptionRows.length} rows
+                </span>
+              </Field>
+            </div>
+            <DataTable rows={filteredOptionRows} columns={optionColumns} maxHeight={540} />
+          </>
         )}
       </Panel>
 
@@ -1057,27 +1110,27 @@ function DataView({ bootstrap }) {
 }
 
 const optionColumns = [
-  { key: 'Maturity' },
-  { key: 'Strike', format: (value) => formatNumber(value, 0) },
-  { key: 'Type' },
-  { key: 'Right' },
   {
-    key: 'Delta Target',
-    label: 'Target',
-    format: (value, row) => {
-      const bucket = signedDeltaBucket(row);
-      return bucket === 0 ? 'ATM' : `${bucket > 0 ? '+' : ''}${formatNumber(bucket * 100, 0)}D`;
-    },
+    key: 'Maturity',
+    format: (value) => (value ? String(value).slice(0, 4) + '-' + String(value).slice(4, 6) : '—'),
   },
+  { key: 'Type' },
+  { key: 'Strike', format: (value) => formatNumber(value, 0) },
+  { key: 'Delta', format: (value) => formatNumber(value, 4) },
+  { key: 'Delta (€)', format: (value) => formatNumber(value, 4) },
   { key: 'Bid', format: (value) => formatNumber(value) },
   { key: 'Ask', format: (value) => formatNumber(value) },
   { key: 'Last', format: (value) => formatNumber(value) },
   { key: 'Mid', format: (value) => formatNumber(value) },
   { key: 'Spread', format: (value) => formatNumber(value) },
-  { key: 'Quote Quality' },
-  { key: 'QC Status' },
-  { key: 'QC Reasons', format: (value) => (Array.isArray(value) && value.length ? value.join(', ') : '—') },
-  { key: 'Surface Eligible', label: 'Surface', format: (value) => (value ? 'yes' : 'no') },
+  { key: 'Gamma', format: (value) => formatNumber(value, 6) },
+  { key: 'Gamma (€)', format: (value) => formatNumber(value, 4) },
+  { key: 'Vega', format: (value) => formatNumber(value, 4) },
+  { key: 'Vega (€)', format: (value) => formatNumber(value, 4) },
+  { key: 'Root Time Vega', format: (value) => formatNumber(value, 4) },
+  { key: 'Root Time Vega (€)', label: 'Root TV (€)', format: (value) => formatNumber(value, 4) },
+  { key: 'Theta', format: (value) => formatNumber(value, 4) },
+  { key: 'Theta (€)', format: (value) => formatNumber(value, 4) },
   {
     key: 'IV %',
     label: 'IV',
@@ -1088,14 +1141,8 @@ const optionColumns = [
     format: (value) => <span className={`source-pill ${value === 'IBKR' ? 'live' : 'calc'}`}>{value ?? '—'}</span>,
   },
   { key: 'IV Status' },
-  { key: 'IV Reason' },
   { key: 'IV Price', format: (value) => formatNumber(value) },
   { key: 'IV Residual', format: (value) => formatNumber(value, 6) },
-  { key: 'Delta', format: (value) => formatNumber(value, 4) },
-  { key: 'Delta (€)', format: (value) => formatNumber(value, 4) },
-  { key: 'Gamma', format: (value) => formatNumber(value, 6) },
-  { key: 'Vega', format: (value) => formatNumber(value, 4) },
-  { key: 'Theta', format: (value) => formatNumber(value, 4) },
 ];
 
 function HistoryChart({ rows, title = '' }) {
@@ -1186,7 +1233,7 @@ function FuturesChart({ rows }) {
 function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
   const surface = useMemo(() => normalizeSurface(surfaceData, rows), [surfaceData, rows]);
   if (!surface.points.length) {
-    return <div className="table-empty">Surface requires rows with IV and strike data.</div>;
+    return <div className="table-empty">Surface requires rows with IV % data.</div>;
   }
 
   const enoughGrid = surface.maturities.length >= 2 && surface.strikes.length >= 2;
@@ -1197,10 +1244,11 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
           x: surface.maturities,
           y: surface.strikes,
           z: surface.z,
-          colorscale: 'Viridis',
+          colorscale: 'RdYlGn',
+          reversescale: false,
           colorbar: { title: 'IV %', thickness: 14 },
           hovertemplate: 'Maturity=%{x}<br>Strike=%{y}<br>IV=%{z:.2f}%<extra></extra>',
-          name: 'Interpolated surface',
+          name: 'IV surface',
         },
         {
           type: 'scatter3d',
@@ -1208,11 +1256,7 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
           x: surface.points.map((row) => row.Maturity),
           y: surface.points.map((row) => Number(row.Strike)),
           z: surface.points.map((row) => Number(row['IV %'])),
-          marker: {
-            size: 3,
-            color: '#f5d76e',
-            opacity: 0.85,
-          },
+          marker: { size: 3, color: '#f5d76e', opacity: 0.85 },
           hovertemplate: 'Observed<br>Maturity=%{x}<br>Strike=%{y}<br>IV=%{z:.2f}%<extra></extra>',
           name: 'Observed quotes',
         },
@@ -1222,12 +1266,12 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
           type: 'scatter3d',
           mode: 'markers',
           x: surface.points.map((row) => row.Maturity),
-          y: surface.points.map((row) => row.Strike),
-          z: surface.points.map((row) => row['IV %']),
+          y: surface.points.map((row) => Number(row.Strike)),
+          z: surface.points.map((row) => Number(row['IV %'])),
           marker: {
             size: 5,
-            color: surface.points.map((row) => row['IV %']),
-            colorscale: 'Viridis',
+            color: surface.points.map((row) => Number(row['IV %'])),
+            colorscale: 'RdYlGn',
             colorbar: { title: 'IV %', thickness: 14 },
           },
           hovertemplate: 'Maturity=%{x}<br>Strike=%{y}<br>IV=%{z:.2f}%<extra></extra>',
@@ -1273,7 +1317,7 @@ function RiskView({ bootstrap }) {
   const [backtest, setBacktest] = useState({ data: null, loading: false, error: null });
   const savedStrategies = useResource(() => apiGet('/api/risk/strategies'), [], true);
   const [activeStrategyId, setActiveStrategyId] = useState(null);
-  const [strategyName, setStrategyName] = useState('Ma stratégie');
+  const [strategyName, setStrategyName] = useState('My strategy');
   const [strategyDescription, setStrategyDescription] = useState('');
   const [strategyAction, setStrategyAction] = useState({ loading: false, error: null, message: null });
 
@@ -1308,6 +1352,11 @@ function RiskView({ bootstrap }) {
   };
 
   const addPosition = async () => {
+    const qty = Number(form.quantity);
+    if (!Number.isFinite(qty) || qty === 0) {
+      setStrategyAction({ loading: false, error: null, message: 'Qty cannot be zero. Use a positive integer for long positions, negative for short.' });
+      return;
+    }
     const payload = {
       label: form.label || `${bootstrap?.index?.symbol ?? 'Index'} ${selectedType.toUpperCase()}`,
       option_type: selectedType,
@@ -1315,7 +1364,7 @@ function RiskView({ bootstrap }) {
       maturity: Number(form.maturity),
       rate: Number(form.ratePercent) / 100,
       sigma: Number(form.sigmaPercent) / 100,
-      quantity: Number(form.quantity),
+      quantity: qty,
       multiplier: Number(form.multiplier),
     };
     const response = await apiPost('/api/risk/position', payload, { spot_value: Number(form.spot) });
@@ -1334,11 +1383,11 @@ function RiskView({ bootstrap }) {
 
   const saveCurrentStrategy = async () => {
     if (!portfolio.length) {
-      setStrategyAction({ loading: false, error: null, message: 'Ajoute au moins une position avant de sauvegarder.' });
+      setStrategyAction({ loading: false, error: null, message: 'Add at least one position before saving.' });
       return;
     }
     if (!strategyName.trim()) {
-      setStrategyAction({ loading: false, error: null, message: 'Donne un nom à la stratégie.' });
+      setStrategyAction({ loading: false, error: null, message: 'Give the strategy a name.' });
       return;
     }
 
@@ -1355,7 +1404,7 @@ function RiskView({ bootstrap }) {
       setStrategyName(saved.name ?? strategyName);
       setStrategyDescription(saved.description ?? strategyDescription);
       savedStrategies.reload();
-      setStrategyAction({ loading: false, error: null, message: 'Stratégie sauvegardée en parquet.' });
+      setStrategyAction({ loading: false, error: null, message: 'Strategy saved.' });
     } catch (error) {
       setStrategyAction({ loading: false, error, message: null });
     }
@@ -1368,10 +1417,10 @@ function RiskView({ bootstrap }) {
       const valued = await valueSavedPositions(strategy.positions ?? []);
       setPortfolio(valued);
       setActiveStrategyId(strategy.strategy_id);
-      setStrategyName(strategy.name ?? 'Ma stratégie');
+      setStrategyName(strategy.name ?? 'My strategy');
       setStrategyDescription(strategy.description ?? '');
       setBacktest({ data: null, loading: false, error: null });
-      setStrategyAction({ loading: false, error: null, message: 'Stratégie chargée.' });
+      setStrategyAction({ loading: false, error: null, message: 'Strategy loaded.' });
     } catch (error) {
       setStrategyAction({ loading: false, error, message: null });
     }
@@ -1385,17 +1434,19 @@ function RiskView({ bootstrap }) {
         setActiveStrategyId(null);
       }
       savedStrategies.reload();
-      setStrategyAction({ loading: false, error: null, message: 'Stratégie supprimée.' });
+      setStrategyAction({ loading: false, error: null, message: 'Strategy deleted.' });
     } catch (error) {
       setStrategyAction({ loading: false, error, message: null });
     }
   };
 
   const startNewStrategy = () => {
+    setPortfolio([]);
     setActiveStrategyId(null);
-    setStrategyName('Ma stratégie');
+    setStrategyName('My strategy');
     setStrategyDescription('');
-    setStrategyAction({ loading: false, error: null, message: 'Nouvelle stratégie prête.' });
+    setBacktest({ data: null, loading: false, error: null });
+    setStrategyAction({ loading: false, error: null, message: 'Simulation cleared.' });
   };
 
   const aggregate = portfolio.reduce(
@@ -1488,13 +1539,13 @@ function RiskView({ bootstrap }) {
           <Field label="Description">
             <textarea value={strategyDescription} onChange={(event) => setStrategyDescription(event.target.value)} rows={2} />
           </Field>
-          <button className="secondary-button form-action" type="button" onClick={startNewStrategy}>
-            <Plus size={16} />
-            New
+          <button className="secondary-button danger-button form-action" type="button" onClick={startNewStrategy}>
+            <Trash2 size={16} />
+            Clear
           </button>
           <button className="primary-button form-action" type="button" onClick={saveCurrentStrategy} disabled={strategyAction.loading || !portfolio.length}>
             <Database size={16} />
-            {activeStrategyId ? 'Save' : 'Save new'}
+            Save
           </button>
         </div>
         {strategyAction.error && <ErrorBlock error={strategyAction.error} />}
@@ -1507,8 +1558,17 @@ function RiskView({ bootstrap }) {
           <Field label="Type">
             <Segmented value={selectedType} options={['call', 'put']} onChange={setSelectedType} />
           </Field>
-          <Field label="Qty">
-            <input type="number" value={form.quantity} onChange={(event) => updateForm('quantity', Number(event.target.value))} />
+          <Field label="Strike K">
+            <input type="number" min="1" value={form.strike} onChange={(event) => updateForm('strike', Number(event.target.value))} />
+          </Field>
+          <Field label="T (yr)">
+            <input type="number" step="0.01" min="0.01" value={form.maturity} onChange={(event) => updateForm('maturity', Number(event.target.value))} />
+          </Field>
+          <Field label="σ (%)">
+            <input type="number" step="1" min="1" value={form.sigmaPercent} onChange={(event) => updateForm('sigmaPercent', Number(event.target.value))} />
+          </Field>
+          <Field label="Qty (− = short)">
+            <input type="number" step="1" value={form.quantity} onChange={(event) => updateForm('quantity', Number(event.target.value))} />
           </Field>
           <button className="primary-button form-action" type="button" onClick={addPosition}>
             <Plus size={16} />
@@ -1532,16 +1592,12 @@ function RiskView({ bootstrap }) {
                 { key: 'strike', format: (value) => formatNumber(value, 0) },
                 { key: 'maturity', format: (value) => formatNumber(value, 2) },
                 { key: 'price', format: (value) => formatNumber(value, 4) },
-                { key: 'quantity', label: 'Qty' },
+                { key: 'quantity', label: 'Qty', format: (value) => (Number.isFinite(value) ? (value > 0 ? `+${value}` : String(value)) : '—') },
                 { key: 'euroGreeks', label: '€ Delta', format: (value) => formatEuro(value?.delta) },
                 { key: 'euroGreeks', label: '€ Vega', format: (value) => formatEuro(value?.vega) },
               ]}
               maxHeight={280}
             />
-            <button className="secondary-button danger-button" type="button" onClick={() => setPortfolio([])}>
-              <Trash2 size={16} />
-              Clear portfolio
-            </button>
           </>
         ) : (
           <div className="table-empty">Add positions to start aggregating Greeks.</div>

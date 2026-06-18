@@ -5,6 +5,7 @@ Returns plain dicts/lists — no pandas, no display logic here.
 
 from __future__ import annotations
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from src.connectivity.session import IBKRClient
 
@@ -14,15 +15,6 @@ SPOT_FIELDS   = ["31", "84", "86", "70", "71", "82", "83"]
 #                last  bid   ask   high  low   chg   chg%
 OPTION_FIELDS = ["31", "84", "86", "7308", "7309", "7310", "7311", "7636"]
 #                last  bid   ask   delta  gamma  vega   theta  IV%
-OPTION_DELTA_BUCKETS = [
-    (0.05, 0.18),
-    (0.10, 0.15),
-    (0.15, 0.13),
-    (0.20, 0.11),
-    (0.25, 0.095),
-    (0.30, 0.08),
-]
-
 # Standard term-structure tenors (per teacher spec: ~10 days, 1-18 months,
 # 2 years, 3 years), paired 1:1 with the month offset used to pick the
 # closest available contract for each tenor.
@@ -473,21 +465,21 @@ def _option_label(right: str, target: float | None, strike: float, atm_strike: f
 
 def get_options_table(
     client: IBKRClient, conid: int, months: list[str], spot: float,
-    delta_step: int = 5,
+    moneyness_band: float = 0.07, max_strikes: int = 30,
 ) -> list[dict]:
     """
     Build the options data table (Tab 1 / Tab 4).
-    For each of the first 6 months: one contract per delta target from
-    -30 to +30 in `delta_step` increments (Puts for negative targets,
-    Calls for positive), with BOTH a Put and a Call resolved at the ATM
-    (0) target. Strikes are picked via a simple OTM% proxy
-    (|delta|/30 * 10%) - the real per-contract Delta from IBKR is
-    returned in the "Delta" column. Conid lookups are deduplicated per
-    unique (strike, right) to bound the number of IBKR calls.
-    Returns list of row dicts with raw Greeks (€ translation done in app layer).
+    For each of the first 6 months: every exchange-listed strike within
+    +/- moneyness_band of spot. OTM puts below ATM, OTM calls above ATM,
+    and BOTH Put and Call at the ATM strike. Capped at max_strikes per
+    month (closest to spot first). Conid lookups run in parallel
+    (ThreadPoolExecutor) to avoid serial round-trips killing performance.
     """
     rows = []
-    delta_targets = list(range(-30, 31, delta_step))
+
+    def _resolve_conid(args: tuple) -> tuple[tuple[float, str], int | None]:
+        s, r, m = args
+        return (s, r), get_option_conid(client, conid, m, s, r)
 
     for month in months[:6]:
         strikes = get_strikes(client, conid, month)
@@ -495,29 +487,41 @@ def get_options_table(
             logger.warning("No strikes for month %s", month)
             continue
 
-        atm_strike = min(strikes, key=lambda k: abs(k - spot))
-        targets: list[dict] = []
-        for d in delta_targets:
-            otm_pct = abs(d) / 30 * 0.10
-            if d < 0:
-                strike = min(strikes, key=lambda k: abs(k - spot * (1 - otm_pct)))
-                targets.append({"strike": strike, "right": "P", "target": abs(d) / 100})
-            elif d > 0:
-                strike = min(strikes, key=lambda k: abs(k - spot * (1 + otm_pct)))
-                targets.append({"strike": strike, "right": "C", "target": d / 100})
-            else:
-                targets.append({"strike": atm_strike, "right": "P", "target": None})
-                targets.append({"strike": atm_strike, "right": "C", "target": None})
+        lo, hi = spot * (1 - moneyness_band), spot * (1 + moneyness_band)
+        band = [k for k in strikes if lo <= k <= hi]
+        if not band:
+            band = [min(strikes, key=lambda k: abs(k - spot))]
+        if len(band) > max_strikes:
+            band = sorted(band, key=lambda k: abs(k - spot))[:max_strikes]
+        band = sorted(band)
 
-        # Resolve each unique (strike, right) once, even if several delta
-        # targets collapse onto the same listed strike.
+        atm_strike = min(band, key=lambda k: abs(k - spot))
+
+        targets: list[tuple[float, str]] = []
+        for k in band:
+            if k < atm_strike:
+                targets.append((k, "P"))
+            elif k > atm_strike:
+                targets.append((k, "C"))
+            else:
+                targets.append((k, "P"))
+                targets.append((k, "C"))
+
+        unique_keys = list(dict.fromkeys(targets))  # deduplicate, preserve order
         conid_map: dict[tuple[float, str], int | None] = {}
-        for contract in targets:
-            strike = contract["strike"]
-            right = contract["right"]
-            key = (strike, right)
-            if key not in conid_map:
-                conid_map[key] = get_option_conid(client, conid, month, strike, right)
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            fut_map = {
+                pool.submit(_resolve_conid, (s, r, month)): (s, r)
+                for s, r in unique_keys
+            }
+            for fut in as_completed(fut_map):
+                try:
+                    key, cid = fut.result()
+                    conid_map[key] = cid
+                except Exception as exc:
+                    sr = fut_map[fut]
+                    logger.warning("conid lookup %s %s %s: %s", month, sr[0], sr[1], exc)
+                    conid_map[sr] = None
 
         unique_conids = {c for c in conid_map.values() if c}
         try:
@@ -527,9 +531,7 @@ def get_options_table(
             logger.warning("option snapshot %s: %s", month, exc)
             snap_map = {}
 
-        for contract in targets:
-            strike = contract["strike"]
-            right = contract["right"]
+        for strike, right in targets:
             opt_conid = conid_map.get((strike, right))
             if not opt_conid:
                 logger.warning("No conid for %s %s %s", month, strike, right)
@@ -540,28 +542,21 @@ def get_options_table(
             last = _num(s.get("31"))
             mid, spread, quality = _option_mid_and_quality(bid, ask, last)
             rows.append({
-                "Maturity": month,
-                "Strike": strike,
-                "Type": "Call" if right == "C" else "Put",
-                "Right": right,
-                "Delta Target": contract["target"],
-                "Delta Target Label": (
-                    "ATM" if contract["target"] is None
-                    else (f"+{int(contract['target'] * 100)}Δ" if right == "C"
-                          else f"-{int(contract['target'] * 100)}Δ")
-                ),
-                "Label": _option_label(right, contract["target"], strike, atm_strike),
-                "Bid": bid,
-                "Ask": ask,
-                "Last": last,
-                "Mid": mid,
-                "Spread": spread,
+                "Maturity":      month,
+                "Strike":        strike,
+                "Type":          "Call" if right == "C" else "Put",
+                "Right":         right,
+                "Bid":           bid,
+                "Ask":           ask,
+                "Last":          last,
+                "Mid":           mid,
+                "Spread":        spread,
                 "Quote Quality": quality,
-                "IV %": _num(s.get("7636")),
-                "Delta": _num(s.get("7308")),
-                "Gamma": _num(s.get("7309")),
-                "Vega": _num(s.get("7310")),
-                "Theta": _num(s.get("7311")),
+                "IV %":          _num(s.get("7636")),
+                "Delta":         _num(s.get("7308")),
+                "Gamma":         _num(s.get("7309")),
+                "Vega":          _num(s.get("7310")),
+                "Theta":         _num(s.get("7311")),
             })
 
     logger.info("Options table: %d rows for %d months", len(rows), len(months[:6]))

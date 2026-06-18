@@ -317,18 +317,16 @@ with tab1:
     st.divider()
 
     # ── Options chain ──────────────────────────────────────────────────────────
-    st.subheader("Options Chain — -30Δ to +30Δ (5Δ steps)")
+    st.subheader("Options Chain — Strikes within ±10% of Spot")
     explain(
         "A snapshot of **option contracts** on the index for several "
-        "maturities, with **one contract per delta target from -30 to "
-        "+30 in steps of 5** (-30, -25, ..., -5, ATM, +5, ..., +30 — 13 "
-        "targets) — out-of-the-money **puts** for negative targets, "
-        "out-of-the-money **calls** for positive targets, and **both a "
-        "Put and a Call at the at-the-money (ATM) target**.\n\n"
-        "- **Delta Target**: the approximate bucket this row was selected "
-        "for (e.g. `-30Δ`, `ATM`, `+15Δ`) — the strike is picked using a "
-        "rough %-from-spot proxy, so the **actual** delta is shown in the "
-        "**Delta** column\n"
+        "maturities. For each maturity, every exchange-listed strike "
+        "within **±10% of the current spot price** is included — "
+        "out-of-the-money **puts** for strikes below spot, OTM **calls** "
+        "for strikes above spot, and **both a Put and a Call at the "
+        "nearest-to-spot (ATM) strike**. This gives ~10–20 strikes per "
+        "maturity (~60–120 rows total across 6 months).\n\n"
+        "- **Strike**: the exercise price of the option\n"
         "- **Type**: Put or Call\n"
         "- **Bid / Ask / Last**: option prices in index points\n"
         "- **IV %**: implied volatility — the market's expectation of future "
@@ -376,7 +374,7 @@ with tab1:
         )
 
         col_order = [
-            "Maturity", "Delta Target Label", "Strike", "Type",
+            "Maturity", "Strike", "Type",
             "Bid", "Ask", "Last", "IV %", "IV Source",
             "Delta", "Delta (€)",
             "Gamma", "Gamma (€)",
@@ -385,7 +383,7 @@ with tab1:
         ]
 
         # ── Filters ──────────────────────────────────────────────────────────
-        f_mat, f_type, f_delta = st.columns(3)
+        f_mat, f_type = st.columns(2)
         with f_mat:
             mat_options = sorted(df_opt["Maturity"].dropna().unique())
             selected_mats = st.multiselect(
@@ -397,16 +395,10 @@ with tab1:
             selected_types = st.multiselect(
                 "Filter Type", options=type_options, default=type_options,
             )
-        with f_delta:
-            delta_options = sorted(df_opt["Delta Target Label"].dropna().unique(), key=_delta_sort_key)
-            selected_deltas = st.multiselect(
-                "Filter Delta Target", options=delta_options, default=delta_options,
-            )
 
         df_display = df_opt[
             df_opt["Maturity"].isin(selected_mats)
             & df_opt["Type"].isin(selected_types)
-            & df_opt["Delta Target Label"].isin(selected_deltas)
         ].copy()
         df_display["Maturity"] = df_display["Maturity"].map(_fmt_maturity)
 
@@ -419,20 +411,17 @@ with tab1:
         # ── Vol surface ────────────────────────────────────────────────────────
         st.subheader("Volatility Surface")
         explain(
-            "A 3D view of **implied volatility (IV %)** across **Delta "
-            "Target** and **Maturity**, built from the options chain above "
-            "(13 delta targets from -30Δ to +30Δ, per maturity).\n\n"
-            "The y-axis is the **Delta Target** bucket (-30Δ ... ATM ... "
-            "+30Δ) rather than the raw strike — different maturities list "
-            "different strike grids, so plotting against raw strike "
-            "produces a disjointed, gappy surface. Delta Target is the same "
-            "13-point grid for every maturity, so the surface is continuous.\n\n"
-            "Normally IV isn't flat — it forms a 'smile' or 'skew' shape across "
-            "delta targets, and a 'term structure' shape across maturities. This "
-            "surface lets you see both at once. For a more detailed version "
-            "with smile and term-structure charts, see the **Surface** tab."
+            "A 3D view of **implied volatility (IV %)** across **Strike** "
+            "and **Maturity**, built from the options chain above "
+            "(all listed strikes within ±10% of spot, per maturity).\n\n"
+            "With many more strikes per maturity the surface is now much "
+            "denser and smoother than before. Normally IV forms a "
+            "'smile' or 'skew' shape across strikes, and a 'term structure' "
+            "shape across maturities. This surface shows both at once. "
+            "For individual smile and term-structure charts, see the "
+            "**Surface** tab."
         )
-        surf = df_opt[df_opt["IV %"].notna() & df_opt["Delta Target Label"].notna()].copy()
+        surf = df_opt[df_opt["IV %"].notna()].copy()
         surf, dropped_mats = filter_liquid_maturities(surf)
         if dropped_mats:
             st.caption(
@@ -442,9 +431,9 @@ with tab1:
 
         if not surf.empty:
             pivot = surf.pivot_table(
-                values="IV %", index="Delta Target Label", columns="Maturity", aggfunc="mean"
+                values="IV %", index="Strike", columns="Maturity", aggfunc="mean"
             )
-            pivot = pivot.reindex(sorted(pivot.index, key=_delta_sort_key))
+            pivot = pivot.reindex(sorted(pivot.index))
             fig = go.Figure(go.Surface(
                 z=pivot.values,
                 x=list(pivot.columns),
@@ -453,7 +442,7 @@ with tab1:
                 colorbar=dict(title="IV %", thickness=15),
                 hovertemplate=(
                     "Maturity=%{x}<br>"
-                    "Delta Target=%{y}<br>"
+                    "Strike=%{y}<br>"
                     "IV=%{z:.2f}%<extra></extra>"
                 ),
             ))
@@ -462,7 +451,7 @@ with tab1:
                 title=f"{INDEX['name']} — Implied Volatility Surface",
                 scene=dict(
                     xaxis_title="Maturity",
-                    yaxis_title="Delta Target",
+                    yaxis_title="Strike",
                     zaxis_title="IV (%)",
                     zaxis=dict(range=[0, surf["IV %"].max()]),
                 ),
@@ -1245,41 +1234,32 @@ with tab4:
             st.subheader("🌀 3D Volatility Surface")
             explain(
                 "Every option in the chain plotted as a 3D surface: "
-                "**Delta Target** on one axis, **Maturity** on the other, "
+                "**Strike** on one axis, **Maturity** on the other, "
                 "and **implied volatility (IV %)** as the height/colour.\n\n"
-                "The y-axis uses the **Delta Target** bucket (-30Δ ... ATM "
-                "... +30Δ) instead of raw strike — each maturity lists a "
-                "different strike grid, so a raw-strike axis produces a "
-                "disjointed surface split into separate strike clusters. "
-                "Delta Target is the same 13-point grid for every maturity, "
-                "so the surface is continuous.\n\n"
-                "If IV were constant, this would be a flat plane. In "
-                "reality it usually curves — higher for far OTM deltas "
-                "(the 'smile') and changes shape across maturities (the "
-                "'term structure'). Drag to rotate, scroll to zoom."
+                "With all listed strikes within ±10% of spot included, "
+                "the surface is now dense enough to show a clear shape: "
+                "typically higher IV for far OTM puts (the 'skew') and "
+                "changes shape across maturities (the 'term structure'). "
+                "Drag to rotate, scroll to zoom."
             )
 
             maturities = sorted(
                 df_surface["Maturity"].dropna().unique()
             )
 
-            surface_points = df_surface[
-                df_surface["Delta Target Label"].notna() & df_surface["IV %"].notna()
-            ].copy()
+            surface_points = df_surface[df_surface["IV %"].notna()].copy()
 
             if (
                 surface_points["Maturity"].nunique() >= 2
-                and surface_points["Delta Target Label"].nunique() >= 2
+                and surface_points["Strike"].nunique() >= 2
             ):
                 pivot_surface = surface_points.pivot_table(
                     values="IV %",
-                    index="Delta Target Label",
+                    index="Strike",
                     columns="Maturity",
                     aggfunc="mean",
                 )
-                pivot_surface = pivot_surface.reindex(
-                    sorted(pivot_surface.index, key=_delta_sort_key)
-                )
+                pivot_surface = pivot_surface.reindex(sorted(pivot_surface.index))
                 fig_surface = go.Figure(
                     go.Surface(
                         z=pivot_surface.values,
@@ -1289,7 +1269,7 @@ with tab4:
                         colorbar=dict(title="IV %", thickness=15),
                         hovertemplate=(
                             "Maturity=%{x}<br>"
-                            "Delta Target=%{y}<br>"
+                            "Strike=%{y}<br>"
                             "IV=%{z:.2f}%<extra></extra>"
                         ),
                     )
@@ -1298,7 +1278,7 @@ with tab4:
                 fig_surface = go.Figure(
                     go.Scatter3d(
                         x=surface_points["Maturity"],
-                        y=surface_points["Delta Target Label"],
+                        y=surface_points["Strike"],
                         z=surface_points["IV %"],
                         mode="markers",
                         marker=dict(
@@ -1309,7 +1289,7 @@ with tab4:
                         ),
                         hovertemplate=(
                             "Maturity=%{x}<br>"
-                            "Delta Target=%{y}<br>"
+                            "Strike=%{y}<br>"
                             "IV=%{z:.2f}%<extra></extra>"
                         ),
                     )
@@ -1321,7 +1301,7 @@ with tab4:
                 title=f"{INDEX['name']} — Implied Volatility Surface",
                 scene=dict(
                     xaxis_title="Maturity",
-                    yaxis_title="Delta Target",
+                    yaxis_title="Strike",
                     zaxis_title="IV (%)",
                     zaxis=dict(range=[0, surface_points["IV %"].max()]),
                     camera=dict(eye=dict(x=1.6, y=1.6, z=0.9)),

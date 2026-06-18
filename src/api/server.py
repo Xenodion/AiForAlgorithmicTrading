@@ -232,6 +232,9 @@ def _option_price(row: pd.Series) -> float | None:
     bid, ask = row.get("Bid"), row.get("Ask")
     if bid is not None and ask is not None and bid > 0 and ask > 0:
         return (bid + ask) / 2.0
+    last = row.get("Last")
+    if last is not None and last > 0:
+        return float(last)
     return None
 
 
@@ -364,6 +367,17 @@ def _option_rows(rt: Runtime, notional: float = 10) -> list[dict[str, Any]]:
             df[f"{greek} (€)"] = df[greek].apply(
                 lambda v: round(v * notional, 4) if v is not None and pd.notna(v) else None
             )
+    if "Vega" in df.columns:
+        def _rtv(row: pd.Series) -> float | None:
+            v = row.get("Vega")
+            if v is None or pd.isna(v):
+                return None
+            t = _maturity_years(str(row["Maturity"]))
+            return round(float(v) / t ** 0.5, 4)
+        df["Root Time Vega"] = df.apply(_rtv, axis=1)
+        df["Root Time Vega (€)"] = df["Root Time Vega"].apply(
+            lambda v: round(v * notional, 4) if v is not None and pd.notna(v) else None
+        )
     return _clean(df)
 
 

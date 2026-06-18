@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import logging
+import time
 import urllib3
 import yaml
 import requests
@@ -117,8 +118,13 @@ class IBKRClient:
             "conids": ",".join(str(c) for c in conids),
             "fields": ",".join(fields),
         }
-        # First call "warms up" the subscription — call twice for real data
+        # First call registers the subscription; IBKR then computes model
+        # fields (IV%, Greeks). Without a pause the second call arrives before
+        # IBKR's pricing engine has finished — all derived fields come back
+        # empty. 0.5 s is enough for liquid index options; increase if Greeks
+        # are still missing on slow market-data days.
         self.get("/iserver/marketdata/snapshot", params=params)
+        time.sleep(0.5)
         return self.get("/iserver/marketdata/snapshot", params=params)
 
     def unsubscribe_all(self) -> None:
