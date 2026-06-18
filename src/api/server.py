@@ -144,6 +144,22 @@ class OrderTicket(BaseModel):
     limitPrice: float | None = None
 
 
+@app.on_event("startup")
+def _startup_surface_warmup() -> None:
+    def _warm() -> None:
+        # Give the server a moment to finish starting, then pre-build the
+        # surface so Operations tab has a stored run on first open.
+        time.sleep(8)
+        try:
+            rt = runtime()
+            cache_key = "surface:10:0.03"
+            _ttl(cache_key, 60, lambda: _surface_payload(rt, notional=10, rate=0.03))
+        except Exception:
+            pass
+
+    threading.Thread(target=_warm, daemon=True, name="surface-warmup").start()
+
+
 def _start_tickle(client: IBKRClient) -> None:
     global _tickle_started
     if _tickle_started:

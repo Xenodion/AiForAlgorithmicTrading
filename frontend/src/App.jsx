@@ -984,7 +984,7 @@ function DataView({ bootstrap, notional, setNotional, options, forwards, surface
           <DataTable
             rows={forwards.data?.rows ?? []}
             columns={[
-              { key: 'Maturity' },
+              { key: 'Maturity', format: (value) => fmtMaturity(value) },
               { key: 'Forward', format: (value) => formatNumber(value) },
               { key: 'Source' },
               { key: 'Candidate Count', format: (value) => formatNumber(value, 0) },
@@ -2247,7 +2247,7 @@ function SurfaceView({ bootstrap }) {
             <Field label="Maturity">
               <select value={selectedMaturity} onChange={(event) => setSelectedMaturity(event.target.value)}>
                 {maturities.map((maturity) => (
-                  <option key={maturity}>{maturity}</option>
+                  <option key={maturity} value={maturity}>{fmtMaturity(maturity)}</option>
                 ))}
               </select>
             </Field>
@@ -2272,7 +2272,7 @@ function SurfaceView({ bootstrap }) {
         <DataTable
           rows={validRows}
           columns={[
-            { key: 'Maturity' },
+            { key: 'Maturity', format: (value) => fmtMaturity(value) },
             { key: 'Strike', format: (value) => formatNumber(value, 0) },
             { key: 'Type' },
             { key: 'IV %', label: 'IV', format: (value) => `${formatNumber(value, 2)}%` },
@@ -2357,7 +2357,7 @@ function TermChart({ rows }) {
         {
           type: 'scatter',
           mode: 'lines+markers',
-          x: clean.map((row) => row.Maturity),
+          x: clean.map((row) => fmtMaturity(row.Maturity)),
           y: clean.map((row) => row['ATM IV']),
           name: 'ATM IV',
           text: clean.map((row) => row.Source),
