@@ -1419,8 +1419,8 @@ function RiskView({ bootstrap }) {
       setActiveStrategyId(strategy.strategy_id);
       setStrategyName(strategy.name ?? 'My strategy');
       setStrategyDescription(strategy.description ?? '');
-      setBacktest({ data: null, loading: false, error: null });
       setStrategyAction({ loading: false, error: null, message: 'Strategy loaded.' });
+      runBacktest(strategy.positions ?? []);
     } catch (error) {
       setStrategyAction({ loading: false, error, message: null });
     }
@@ -1469,12 +1469,14 @@ function RiskView({ bootstrap }) {
     return sum + raw * (item.input?.quantity ?? 1) * (item.input?.multiplier ?? 1);
   }, 0);
 
-  const runBacktest = async () => {
+  const runBacktest = async (positionsInput) => {
+    const positions = positionsInput ?? portfolio.map((item) => item.input);
+    if (!positions.length) return;
     setBacktest({ data: null, loading: true, error: null });
     try {
       const data = await apiPost('/api/risk/backtest/report', {
         period: backtestPeriod,
-        positions: portfolio.map((item) => item.input),
+        positions,
       });
       setBacktest({ data, loading: false, error: null });
     } catch (error) {
@@ -1604,77 +1606,148 @@ function RiskView({ bootstrap }) {
         )}
       </Panel>
 
-      <Panel
-        title="Saved strategies"
-        icon={Database}
-        action={<RefreshButton onClick={savedStrategies.reload} loading={savedStrategies.loading} />}
-      >
-        {savedStrategies.error && <ErrorBlock error={savedStrategies.error} />}
-        <DataTable
-          rows={savedStrategies.data?.strategies ?? []}
-          columns={[
-            { key: 'name', label: 'Name' },
-            { key: 'description', label: 'Description' },
-            { key: 'position_count', label: 'Positions', format: (value) => formatNumber(value, 0) },
-            { key: 'updated_at', label: 'Updated' },
-            {
-              key: 'strategy_id',
-              label: 'Actions',
-              format: (value) => (
-                <div className="table-actions">
-                  <button className="secondary-button" type="button" onClick={() => loadSavedStrategy(value)} disabled={strategyAction.loading}>
-                    Load
-                  </button>
-                  <button className="secondary-button danger-button inline-danger" type="button" onClick={() => deleteSavedStrategy(value)} disabled={strategyAction.loading}>
-                    Delete
-                  </button>
-                </div>
-              ),
-            },
-          ]}
-          maxHeight={280}
-        />
-      </Panel>
-
       <Panel title="Local P&L approximation" icon={LineChart}>
-        <div className="slider-grid">
-          <Field label={`Spot move: ${pnlInputs.dS} pts`}>
-            <input type="range" min="-500" max="500" step="10" value={pnlInputs.dS} onChange={(event) => setPnlInputs((v) => ({ ...v, dS: Number(event.target.value) }))} />
-          </Field>
-          <Field label={`Vol move: ${pnlInputs.volMovePct} vol pts`}>
-            <input type="range" min="-10" max="10" step="1" value={pnlInputs.volMovePct} onChange={(event) => setPnlInputs((v) => ({ ...v, volMovePct: Number(event.target.value) }))} />
-          </Field>
-          <Field label={`Time: ${pnlInputs.days} days`}>
-            <input type="range" min="0" max="30" step="1" value={pnlInputs.days} onChange={(event) => setPnlInputs((v) => ({ ...v, days: Number(event.target.value) }))} />
-          </Field>
-        </div>
-        <div className="metric-grid one">
-          <MetricTile label="Estimated P&L" value={formatEuro(localPnl)} tone={localPnl >= 0 ? 'good' : 'bad'} />
-        </div>
+        {portfolio.length === 0 ? (
+          <div className="table-empty">Build a portfolio above, then move the sliders to estimate P&amp;L.</div>
+        ) : (
+          <>
+            <Insight>
+              Simulating <strong>{strategyName}</strong> · {portfolio.length} position{portfolio.length !== 1 ? 's' : ''}
+            </Insight>
+            <div className="slider-grid">
+              <Field label={`Spot move: ${pnlInputs.dS} pts`}>
+                <input type="range" min="-500" max="500" step="10" value={pnlInputs.dS} onChange={(event) => setPnlInputs((v) => ({ ...v, dS: Number(event.target.value) }))} />
+              </Field>
+              <Field label={`Vol move: ${pnlInputs.volMovePct} vol pts`}>
+                <input type="range" min="-10" max="10" step="1" value={pnlInputs.volMovePct} onChange={(event) => setPnlInputs((v) => ({ ...v, volMovePct: Number(event.target.value) }))} />
+              </Field>
+              <Field label={`Time: ${pnlInputs.days} days`}>
+                <input type="range" min="0" max="30" step="1" value={pnlInputs.days} onChange={(event) => setPnlInputs((v) => ({ ...v, days: Number(event.target.value) }))} />
+              </Field>
+            </div>
+            <div className="metric-grid one">
+              <MetricTile label="Estimated P&L" value={formatEuro(localPnl)} tone={localPnl >= 0 ? 'good' : 'bad'} />
+            </div>
+          </>
+        )}
       </Panel>
 
       <Panel
         title="Portfolio backtest"
         icon={LineChart}
         action={
-          <button className="secondary-button" type="button" disabled={!portfolio.length || backtest.loading} onClick={runBacktest}>
+          <button className="secondary-button" type="button" disabled={!portfolio.length || backtest.loading} onClick={() => runBacktest()}>
             <Play size={16} />
-            Run
+            Re-run
           </button>
         }
       >
-        <div className="control-row">
-          <Field label="Lookback">
-            <select value={backtestPeriod} onChange={(event) => setBacktestPeriod(event.target.value)}>
-              {['1m', '3m', '6m', '1y'].map((value) => (
-                <option key={value}>{value}</option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        {backtest.error && <ErrorBlock error={backtest.error} />}
-        {backtest.loading ? <LoadingBlock label="Running backtest" /> : <BacktestChart data={backtest.data} />}
+        {portfolio.length === 0 ? (
+          <div className="table-empty">Load or build a portfolio above — the backtest runs automatically on load.</div>
+        ) : (
+          <>
+            <Insight>
+              Backtesting <strong>{strategyName}</strong> · {portfolio.length} position{portfolio.length !== 1 ? 's' : ''}
+            </Insight>
+            <div className="control-row">
+              <Field label="Lookback">
+                <select value={backtestPeriod} onChange={(event) => setBacktestPeriod(event.target.value)}>
+                  {['1m', '3m', '6m', '1y'].map((value) => (
+                    <option key={value}>{value}</option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+            {backtest.error && <ErrorBlock error={backtest.error} />}
+            {backtest.loading ? <LoadingBlock label="Running backtest" /> : <BacktestChart data={backtest.data} />}
+          </>
+        )}
       </Panel>
+
+      <Panel
+        title="Saved strategies"
+        icon={Database}
+        action={<RefreshButton onClick={savedStrategies.reload} loading={savedStrategies.loading} />}
+      >
+        {savedStrategies.error && <ErrorBlock error={savedStrategies.error} />}
+        {savedStrategies.loading && !savedStrategies.data ? (
+          <LoadingBlock label="Loading strategies" />
+        ) : !(savedStrategies.data?.strategies?.length) ? (
+          <div className="table-empty">No saved strategies yet — build a portfolio and click Save.</div>
+        ) : (
+          <div className="strategy-list">
+            {savedStrategies.data.strategies.map((strategy) => (
+              <StrategyCard
+                key={strategy.strategy_id}
+                strategy={strategy}
+                onLoad={loadSavedStrategy}
+                onDelete={deleteSavedStrategy}
+                loading={strategyAction.loading}
+              />
+            ))}
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function StrategyCard({ strategy, onLoad, onDelete, loading }) {
+  const positions = strategy.positions ?? [];
+  const date = strategy.updated_at ? String(strategy.updated_at).slice(0, 10) : null;
+
+  return (
+    <div className="strategy-item">
+      <div className="strategy-item-header">
+        <div className="strategy-item-meta">
+          <strong>{strategy.name || 'Unnamed'}</strong>
+          {strategy.underlying && <span className="source-pill live">{strategy.underlying}</span>}
+          <span className="strategy-item-pos-count">{strategy.position_count} position{strategy.position_count !== 1 ? 's' : ''}</span>
+        </div>
+        {date && <span className="strategy-item-date">{date}</span>}
+      </div>
+
+      {strategy.description && <p className="strategy-item-desc">{strategy.description}</p>}
+
+      {positions.length > 0 && (
+        <div className="table-wrap strategy-item-table">
+          <table>
+            <thead>
+              <tr>
+                <th>Label</th>
+                <th>Type</th>
+                <th>Strike K</th>
+                <th>T (yr)</th>
+                <th>σ (%)</th>
+                <th>Qty</th>
+              </tr>
+            </thead>
+            <tbody>
+              {positions.map((pos, index) => (
+                <tr key={index}>
+                  <td>{pos.label ?? '—'}</td>
+                  <td style={{ textTransform: 'capitalize' }}>{pos.option_type ?? '—'}</td>
+                  <td>{formatNumber(pos.strike, 0)}</td>
+                  <td>{formatNumber(pos.maturity, 2)}</td>
+                  <td>{pos.sigma != null ? formatNumber(pos.sigma * 100, 1) : '—'}</td>
+                  <td className={pos.quantity < 0 ? 'cell-bad' : 'cell-good'}>
+                    {pos.quantity != null ? (pos.quantity > 0 ? `+${pos.quantity}` : String(pos.quantity)) : '—'}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="strategy-item-footer">
+        <button className="primary-button" type="button" onClick={() => onLoad(strategy.strategy_id)} disabled={loading}>
+          Load
+        </button>
+        <button className="secondary-button danger-button" type="button" onClick={() => onDelete(strategy.strategy_id)} disabled={loading}>
+          Delete
+        </button>
+      </div>
     </div>
   );
 }

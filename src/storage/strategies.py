@@ -73,6 +73,19 @@ def list_strategies() -> list[dict[str, Any]]:
     rows = []
     for strategy_id, group in frame.groupby("strategy_id", sort=False):
         first = group.iloc[0]
+        sorted_group = group.sort_values("position_index")
+        positions = [
+            {
+                "label": row.get("label"),
+                "option_type": row.get("option_type"),
+                "strike": float(row["strike"]) if pd.notna(row.get("strike")) else None,
+                "maturity": float(row["maturity"]) if pd.notna(row.get("maturity")) else None,
+                "sigma": float(row["sigma"]) if pd.notna(row.get("sigma")) else None,
+                "quantity": int(row["quantity"]) if pd.notna(row.get("quantity")) else None,
+                "multiplier": float(row["multiplier"]) if pd.notna(row.get("multiplier")) else None,
+            }
+            for _, row in sorted_group.iterrows()
+        ]
         rows.append({
             "strategy_id": strategy_id,
             "name": first.get("name"),
@@ -81,7 +94,7 @@ def list_strategies() -> list[dict[str, Any]]:
             "created_at": first.get("created_at"),
             "updated_at": first.get("updated_at"),
             "position_count": int(len(group)),
-            "schema_version": first.get("schema_version"),
+            "positions": positions,
         })
     return sorted(rows, key=lambda row: row.get("updated_at") or "", reverse=True)
 

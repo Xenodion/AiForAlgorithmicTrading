@@ -1077,6 +1077,74 @@ tr:hover td {
   background: #281815;
 }
 
+/* Strategy cards */
+.strategy-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.strategy-item {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel-soft);
+  overflow: hidden;
+}
+
+.strategy-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 14px;
+}
+
+.strategy-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.strategy-item-meta strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.strategy-item-pos-count {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.strategy-item-date {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.strategy-item-desc {
+  margin: 0;
+  padding: 0 14px 10px;
+  font-size: 12px;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.strategy-item-table {
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+  max-height: 200px;
+}
+
+.strategy-item-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+}
+
 .plot {
   width: 100%;
 }
