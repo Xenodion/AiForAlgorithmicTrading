@@ -1230,6 +1230,11 @@ function FuturesChart({ rows }) {
   );
 }
 
+function fmtMaturity(m) {
+  const s = String(m);
+  return s.length === 6 ? `${s.slice(0, 4)}-${s.slice(4, 6)}` : s;
+}
+
 function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
   const surface = useMemo(() => normalizeSurface(surfaceData, rows), [surfaceData, rows]);
   if (!surface.points.length) {
@@ -1241,7 +1246,7 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
     ? [
         {
           type: 'surface',
-          x: surface.maturities,
+          x: surface.maturities.map(fmtMaturity),
           y: surface.strikes,
           z: surface.z,
           colorscale: 'RdYlGn',
@@ -1253,7 +1258,7 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
         {
           type: 'scatter3d',
           mode: 'markers',
-          x: surface.points.map((row) => row.Maturity),
+          x: surface.points.map((row) => fmtMaturity(row.Maturity)),
           y: surface.points.map((row) => Number(row.Strike)),
           z: surface.points.map((row) => Number(row['IV %'])),
           marker: { size: 3, color: '#f5d76e', opacity: 0.85 },
@@ -1265,7 +1270,7 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
         {
           type: 'scatter3d',
           mode: 'markers',
-          x: surface.points.map((row) => row.Maturity),
+          x: surface.points.map((row) => fmtMaturity(row.Maturity)),
           y: surface.points.map((row) => Number(row.Strike)),
           z: surface.points.map((row) => Number(row['IV %'])),
           marker: {
@@ -1962,13 +1967,13 @@ function OrdersView({ bootstrap }) {
           <LoadingBlock label="Loading account preview" />
         ) : (
           <div className="metric-grid four">
-            <MetricTile label="Net liquidation" value="€ —" />
-            <MetricTile label="Buying power" value="€ —" />
-            <MetricTile label="Cash" value="€ —" />
-            <MetricTile label="Margin used" value="€ —" />
+            <MetricTile label="Account type" value="Paper" tone="warn" />
+            <MetricTile label="Routing" value={preview.data?.routingEnabled ? 'Live' : 'Disabled'} tone={preview.data?.routingEnabled ? 'bad' : 'good'} />
+            <MetricTile label="Open orders" value={formatNumber(preview.data?.openOrders?.length ?? 0, 0)} />
+            <MetricTile label="Safety version" value={preview.data?.safetyVersion ?? '—'} />
           </div>
         )}
-        <Insight>Real broker routing is locked off; the ticket can be validated and dry-run without sending an order.</Insight>
+        <Insight>Real broker routing is locked off. Use Validate to check the ticket, Dry-run to simulate submission — no order reaches the broker.</Insight>
       </Panel>
 
       <Panel title="Order ticket preview" icon={Send}>
@@ -2018,18 +2023,58 @@ function OrdersView({ bootstrap }) {
           </>
         )}
         {orderResult.dryRun && (
-          <Insight>
-            Dry-run {orderResult.dryRun.dryRunId}: {orderResult.dryRun.status}. {orderResult.dryRun.message}
-          </Insight>
+          <>
+            <Insight>
+              <strong>Dry-run {orderResult.dryRun.dryRunId}</strong> · {orderResult.dryRun.createdAt?.slice(0, 19).replace('T', ' ')} UTC ·{' '}
+              <span style={{ color: orderResult.dryRun.status === 'accepted_for_preview' ? 'var(--good)' : 'var(--bad)' }}>
+                {orderResult.dryRun.status}
+              </span>
+              {' '}— {orderResult.dryRun.message}
+            </Insight>
+            {orderResult.dryRun.validation?.normalizedTicket && (
+              <DataTable
+                rows={Object.entries(orderResult.dryRun.validation.normalizedTicket).map(([field, value]) => ({
+                  Field: field.replace(/([A-Z])/g, ' $1').trim(),
+                  Value: value ?? '—',
+                }))}
+                columns={[{ key: 'Field' }, { key: 'Value' }]}
+                maxHeight={200}
+              />
+            )}
+          </>
         )}
       </Panel>
 
       <Panel title="Open orders" icon={Database}>
-        <DataTable rows={preview.data?.openOrders ?? []} columns={[{ key: 'Order ID' }, { key: 'Symbol' }, { key: 'Side' }, { key: 'Qty' }, { key: 'Type' }, { key: 'Status' }]} />
+        {preview.loading && !preview.data ? (
+          <LoadingBlock label="Loading orders" />
+        ) : preview.data?.openOrders?.length ? (
+          <DataTable
+            rows={preview.data.openOrders}
+            columns={[{ key: 'Order ID' }, { key: 'Symbol' }, { key: 'Side' }, { key: 'Qty' }, { key: 'Type' }, { key: 'Status' }]}
+          />
+        ) : (
+          <div className="table-empty">No open orders — order routing is disabled, so no orders can be placed via this platform.</div>
+        )}
       </Panel>
 
       <Panel title="Positions" icon={Layers3}>
-        <DataTable rows={preview.data?.positions ?? []} columns={[{ key: 'Symbol' }, { key: 'Qty' }, { key: 'Avg Price' }, { key: 'Market Price' }, { key: 'PnL' }]} />
+        {preview.loading && !preview.data ? (
+          <LoadingBlock label="Loading positions" />
+        ) : preview.data?.positions?.length ? (
+          <DataTable
+            rows={preview.data.positions}
+            columns={[
+              { key: 'Symbol' },
+              { key: 'Qty' },
+              { key: 'Avg Price', format: (v) => formatNumber(v, 2) },
+              { key: 'Market Price', format: (v) => formatNumber(v, 2) },
+              { key: 'PnL', format: (v) => formatEuro(v), className: (v) => (v >= 0 ? 'cell-good' : 'cell-bad') },
+            ]}
+          />
+        ) : (
+          <div className="table-empty">No positions in the paper account — place a paper trade in IBKR TWS to see positions here.</div>
+        )}
       </Panel>
     </div>
   );

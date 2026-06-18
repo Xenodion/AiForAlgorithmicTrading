@@ -809,18 +809,45 @@ def risk_backtest_report(payload: BacktestRequest):
 
 @app.get("/api/orders/preview")
 def orders_preview():
-    return {
-        "account": {
-            "netLiquidation": None,
-            "buyingPower": None,
-            "cash": None,
-            "marginUsed": None,
-        },
-        "openOrders": [],
-        "positions": [],
+    try:
+        rt = runtime()
+        accounts = rt.client.get_accounts()
+        account_id = accounts[0] if accounts else None
+
+        raw_orders = rt.client.get_open_orders()
+        raw_positions = rt.client.get_positions(account_id) if account_id else []
+
+        open_orders = [
+            {
+                "Order ID": str(o.get("orderId") or "—"),
+                "Symbol": o.get("ticker") or o.get("symbol") or "—",
+                "Side": o.get("side") or "—",
+                "Qty": o.get("totalSize") or o.get("quantity") or "—",
+                "Type": o.get("orderType") or "—",
+                "Status": o.get("status") or "—",
+            }
+            for o in raw_orders
+        ]
+        positions = [
+            {
+                "Symbol": p.get("contractDesc") or p.get("ticker") or "—",
+                "Qty": p.get("position") or "—",
+                "Avg Price": p.get("avgCost"),
+                "Market Price": p.get("mktPrice"),
+                "PnL": p.get("unrealizedPnl"),
+            }
+            for p in raw_positions
+        ]
+    except Exception:
+        open_orders = []
+        positions = []
+
+    return _clean({
+        "openOrders": open_orders,
+        "positions": positions,
         "routingEnabled": False,
         "safetyVersion": ORDER_SAFETY_VERSION,
-    }
+    })
 
 
 @app.post("/api/orders/validate")

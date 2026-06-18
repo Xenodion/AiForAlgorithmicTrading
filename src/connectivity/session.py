@@ -135,6 +135,26 @@ class IBKRClient:
             pass
 
     # ------------------------------------------------------------------
+    # Account, positions, and orders
+    # ------------------------------------------------------------------
+
+    def get_open_orders(self) -> list:
+        """Return open orders for the current session."""
+        try:
+            result = self.get("/iserver/account/orders")
+            return result.get("orders", []) if isinstance(result, dict) else []
+        except Exception:
+            return []
+
+    def get_positions(self, account_id: str) -> list:
+        """Return positions for the given account (page 0)."""
+        try:
+            result = self.get(f"/portfolio/{account_id}/positions/0")
+            return result if isinstance(result, list) else []
+        except Exception:
+            return []
+
+    # ------------------------------------------------------------------
     # Option chains
     # ------------------------------------------------------------------
 
