@@ -1292,6 +1292,16 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
         },
       ];
 
+  const zValues = [];
+  if (Array.isArray(surface.z)) {
+    for (const zRow of surface.z) for (const v of zRow) if (Number.isFinite(v)) zValues.push(v);
+  }
+  for (const point of surface.points) {
+    const v = Number(point['IV %']);
+    if (Number.isFinite(v)) zValues.push(v);
+  }
+  const zMax = zValues.length ? Math.ceil(Math.max(...zValues) * 1.1) : 50;
+
   return (
     <Plot
       data={data}
@@ -1301,7 +1311,7 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
         scene: {
           xaxis: { title: 'Maturity', gridcolor: '#263937' },
           yaxis: { title: 'Strike', gridcolor: '#263937' },
-          zaxis: { title: 'IV (%)', gridcolor: '#263937' },
+          zaxis: { title: 'IV (%)', gridcolor: '#263937', range: [0, zMax] },
           camera: { eye: { x: 1.55, y: 1.55, z: 0.95 } },
         },
       }}
