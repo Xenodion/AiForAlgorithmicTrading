@@ -1235,6 +1235,15 @@ function fmtMaturity(m) {
   return s.length === 6 ? `${s.slice(0, 4)}-${s.slice(4, 6)}` : s;
 }
 
+function maturityYears(month) {
+  const s = String(month);
+  if (s.length < 6) return null;
+  const year = Number(s.slice(0, 4));
+  const m = Number(s.slice(4, 6));
+  const expiry = new Date(year, m, 0); // last calendar day of month m (1-indexed)
+  return Math.max((expiry.getTime() - Date.now()) / (365 * 24 * 3600 * 1000), 1 / 365);
+}
+
 function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
   const surface = useMemo(() => normalizeSurface(surfaceData, rows), [surfaceData, rows]);
   if (!surface.points.length) {
@@ -1828,8 +1837,11 @@ function PricingCard({ optionType, data, selected, onSelect }) {
 
 function ScenarioMatrix({ rows }) {
   if (!rows.length) return <div className="table-empty">Scenario data unavailable.</div>;
-  const spotShocks = uniqueSorted(rows, 'Spot shock');
-  const volShocks = uniqueSorted(rows, 'Vol shock');
+  // Sort the shock labels by their numeric value ("+10%", "-5%" ...) so the
+  // axes read as a number line; a plain string sort jumbles the signs.
+  const byPct = (a, b) => parseFloat(a) - parseFloat(b);
+  const spotShocks = [...new Set(rows.map((row) => row['Spot shock']).filter(Boolean))].sort(byPct);
+  const volShocks = [...new Set(rows.map((row) => row['Vol shock']).filter(Boolean))].sort(byPct);
   const valueFor = (spotShock, volShock) =>
     rows.find((row) => row['Spot shock'] === spotShock && row['Vol shock'] === volShock)?.['P&L (full)'];
 
@@ -2426,23 +2438,71 @@ function SmileChart({ rows }) {
 }
 
 function TermChart({ rows }) {
-  const clean = rows.filter((row) => row['ATM IV'] !== null && row['ATM IV'] !== undefined);
-  if (!clean.length) return <div className="table-empty">No term structure data available.</div>;
+  const observed = rows
+    .filter((row) => row['ATM IV'] !== null && row['ATM IV'] !== undefined)
+    .map((row) => ({
+      T: maturityYears(row.Maturity),
+      iv: Number(row['ATM IV']),
+      label: fmtMaturity(row.Maturity),
+      source: row.Source,
+    }))
+    .filter((p) => p.T !== null && Number.isFinite(p.iv))
+    .sort((a, b) => a.T - b.T);
+
+  if (!observed.length) return <div className="table-empty">No term structure data available.</div>;
+
+  // Densify by interpolating ATM total variance (w = σ²·T) linearly between
+  // observed maturities, then converting back to IV. This is the standard,
+  // calendar-arbitrage-aware way to add resolution without inventing data.
+  const tv = observed.map((p) => ({ T: p.T, w: (p.iv / 100) ** 2 * p.T }));
+  const curve = [];
+  if (tv.length >= 2) {
+    const tMin = tv[0].T;
+    const tMax = tv[tv.length - 1].T;
+    const steps = 80;
+    for (let i = 0; i <= steps; i += 1) {
+      const T = tMin + ((tMax - tMin) * i) / steps;
+      let w = null;
+      for (let j = 0; j < tv.length - 1; j += 1) {
+        if (T >= tv[j].T && T <= tv[j + 1].T) {
+          const span = tv[j + 1].T - tv[j].T;
+          const frac = span === 0 ? 0 : (T - tv[j].T) / span;
+          w = tv[j].w + frac * (tv[j + 1].w - tv[j].w);
+          break;
+        }
+      }
+      if (w !== null && T > 0) curve.push({ T, iv: Math.sqrt(Math.max(w / T, 0)) * 100 });
+    }
+  }
+
+  const data = [];
+  if (curve.length) {
+    data.push({
+      type: 'scatter',
+      mode: 'lines',
+      x: curve.map((p) => p.T),
+      y: curve.map((p) => p.iv),
+      name: 'Interpolated',
+      line: { color: '#d9a441', width: 2, shape: 'spline' },
+      hovertemplate: 'T=%{x:.2f}y<br>ATM IV=%{y:.2f}%<extra></extra>',
+    });
+  }
+  data.push({
+    type: 'scatter',
+    mode: curve.length ? 'markers' : 'lines+markers',
+    x: observed.map((p) => p.T),
+    y: observed.map((p) => p.iv),
+    name: 'Observed',
+    text: observed.map((p) => `${p.label} · ${p.source}`),
+    marker: { color: '#f5d76e', size: 8, line: { color: '#8a6d2f', width: 1 } },
+    line: { color: '#d9a441', width: 2 },
+    hovertemplate: '%{text}<br>T=%{x:.2f}y<br>ATM IV=%{y:.2f}%<extra></extra>',
+  });
+
   return (
     <Plot
-      data={[
-        {
-          type: 'scatter',
-          mode: 'lines+markers',
-          x: clean.map((row) => fmtMaturity(row.Maturity)),
-          y: clean.map((row) => row['ATM IV']),
-          name: 'ATM IV',
-          text: clean.map((row) => row.Source),
-          hovertemplate: 'Maturity=%{x}<br>ATM IV=%{y:.2f}%<br>%{text}<extra></extra>',
-          line: { color: '#d9a441', width: 2 },
-        },
-      ]}
-      layout={{ ...plotLayout, height: 380, xaxis: { title: 'Maturity' }, yaxis: { title: 'ATM IV (%)' } }}
+      data={data}
+      layout={{ ...plotLayout, height: 380, xaxis: { title: 'Maturity (years)' }, yaxis: { title: 'ATM IV (%)' } }}
       config={plotConfig}
       useResizeHandler
       className="plot"
