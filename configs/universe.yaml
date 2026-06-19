@@ -20,12 +20,16 @@ underlyings:
 option_chain:
   # Maturities to monitor (in months from today)
   maturity_windows_months: [1, 2, 3, 6, 9, 12, 18]
-  # Strike selection: one contract per delta target from -30 to +30
-  # in steps of delta_step (Puts for negative targets, Calls for
-  # positive), plus both a Put and a Call at the ATM (0) target.
-  # Strikes are picked via an OTM% proxy (|delta|/30 * 10%); the real
-  # per-contract Delta from IBKR is shown in the "Delta" column.
-  delta_step: 5
+  # Strike selection: exchange-listed strikes within an ASYMMETRIC band
+  # around spot - down to -put_band (deep OTM puts, where the index skew
+  # lives) and up to +call_band (OTM calls). OTM puts below ATM, OTM calls
+  # above, both Put and Call at the ATM strike. When the band holds more than
+  # max_strikes, strikes are sampled evenly across the range (keeping the
+  # wings) rather than only the closest to spot. The real per-contract Delta
+  # from IBKR is shown in the "Delta" column.
+  put_band_pct: 0.25
+  call_band_pct: 0.10
+  max_strikes_per_expiry: 40
   min_open_interest: 10
 
 futures:

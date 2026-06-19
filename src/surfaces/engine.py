@@ -191,15 +191,37 @@ def build_surface(
             })
         z_full.append(z_row)
 
-    complete_strikes = [
-        strike
-        for strike, z_row in zip(strikes, z_full)
-        if z_row and all(value is not None for value in z_row)
+    # Build the displayed mesh over the maturities that are dense enough to
+    # anchor it (>= 4 points). A single thin near-expiry/illiquid slice must
+    # not collapse the whole surface to its narrow strike range. Within the
+    # common strike RANGE of those maturities, every strike interpolates to a
+    # value (no holes), so the mesh is fully connected.
+    grid_maturities = [m for m in maturities if len(by_maturity[m]) >= 4] or maturities
+    grid_mat_cols = [maturities.index(m) for m in grid_maturities]
+
+    grid_ranges = [
+        (
+            min(point["Strike"] for point in by_maturity[m]),
+            max(point["Strike"] for point in by_maturity[m]),
+        )
+        for m in grid_maturities
     ]
-    display_strikes = complete_strikes or strikes
+    common_lo = max(low for low, _ in grid_ranges)
+    common_hi = min(high for _, high in grid_ranges)
+    if common_lo > common_hi:  # no overlap - fall back to the full union
+        common_lo, common_hi = min(strikes), max(strikes)
+
+    display_strikes = [k for k in strikes if common_lo <= k <= common_hi] or strikes
     display_strike_set = set(display_strikes)
-    display_rows = [row for row in grid_rows if row["Strike"] in display_strike_set]
-    z = [z_row for strike, z_row in zip(strikes, z_full) if strike in display_strike_set]
+    grid_maturity_set = set(grid_maturities)
+    display_rows = [
+        row for row in grid_rows
+        if row["Strike"] in display_strike_set and row["Maturity"] in grid_maturity_set
+    ]
+    z = [
+        [z_full[strikes.index(strike)][col] for col in grid_mat_cols]
+        for strike in display_strikes
+    ]
 
     for maturity, points in by_maturity.items():
         point_errors = []
@@ -229,8 +251,8 @@ def build_surface(
         warnings.append("no_surface_eligible_points")
     if calendar["violationCount"]:
         warnings.append("calendar_total_variance_decrease")
-    if iv_points and not complete_strikes:
-        warnings.append("no_complete_common_strike_domain")
+    if iv_points and len(display_strikes) < 2:
+        warnings.append("no_common_strike_domain")
 
     return {
         "modelVersion": SURFACE_MODEL_VERSION,
@@ -241,7 +263,7 @@ def build_surface(
         "forwardDiagnostics": forward_diagnostics or {},
         "ivPoints": iv_points,
         "grid": {
-            "maturities": maturities,
+            "maturities": grid_maturities,
             "strikes": display_strikes,
             "z": z,
             "rows": display_rows,

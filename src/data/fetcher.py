@@ -14,7 +14,8 @@ logger = logging.getLogger(__name__)
 SPOT_FIELDS   = ["31", "84", "86", "70", "71", "82", "83"]
 #                last  bid   ask   high  low   chg   chg%
 OPTION_FIELDS = ["31", "84", "86", "7308", "7309", "7310", "7311", "7636"]
-#                last  bid   ask   delta  gamma  vega   theta  IV%
+#                last  bid   ask   delta  gamma  theta  vega   IV%
+#  IBKR field IDs: 7310 = Theta, 7311 = Vega (NOT the other way round).
 # Standard term-structure tenors (per teacher spec: ~10 days, 1-18 months,
 # 2 years, 3 years), paired 1:1 with the month offset used to pick the
 # closest available contract for each tenor.
@@ -397,6 +398,12 @@ def _third_friday(month: str) -> str:
     return date(year, mon, first_friday + 14).strftime("%Y%m%d")
 
 
+def _days_to_expiry(month: str) -> int:
+    """Calendar days from today to the month's 3rd-Friday expiry."""
+    exp = _third_friday(month)
+    return (date(int(exp[:4]), int(exp[4:6]), int(exp[6:8])) - date.today()).days
+
+
 def get_option_conid(client: IBKRClient, conid: int, month: str, strike: float, right: str) -> int | None:
     """
     Resolve a single option contract conid via /iserver/secdef/info.
@@ -463,17 +470,42 @@ def _option_label(right: str, target: float | None, strike: float, atm_strike: f
     return f"{prefix}{int(target * 100)}Δ {side}"
 
 
+def _sample_evenly(sorted_values: list[float], count: int, keep: float | None = None) -> list[float]:
+    """
+    Pick `count` values spread evenly across a sorted list (not clustered at
+    the center). Used to retain the wings of the strike range when the band
+    has more strikes than the cap allows — sampling the closest-to-spot only
+    would throw the wings away and flatten the smile.
+    """
+    if len(sorted_values) <= count:
+        return list(sorted_values)
+    n = len(sorted_values)
+    idxs = {round(i * (n - 1) / (count - 1)) for i in range(count)}
+    chosen = {sorted_values[i] for i in idxs}
+    if keep is not None:
+        chosen.add(keep)
+    return sorted(chosen)
+
+
 def get_options_table(
     client: IBKRClient, conid: int, months: list[str], spot: float,
-    moneyness_band: float = 0.07, max_strikes: int = 30,
+    put_band: float = 0.25, call_band: float = 0.10, max_strikes: int = 40,
+    min_days_to_expiry: int = 10,
 ) -> list[dict]:
     """
     Build the options data table (Tab 1 / Tab 4).
-    For each of the first 6 months: every exchange-listed strike within
-    +/- moneyness_band of spot. OTM puts below ATM, OTM calls above ATM,
-    and BOTH Put and Call at the ATM strike. Capped at max_strikes per
-    month (closest to spot first). Conid lookups run in parallel
-    (ThreadPoolExecutor) to avoid serial round-trips killing performance.
+    For each of the first 6 months: exchange-listed strikes within an
+    ASYMMETRIC band around spot - down to -put_band (deep OTM puts, where the
+    index skew lives) and up to +call_band (OTM calls). OTM puts below ATM,
+    OTM calls above ATM, and BOTH Put and Call at the ATM strike. When the
+    band holds more than max_strikes, strikes are sampled EVENLY across the
+    range (keeping the wings) rather than keeping only the closest to spot.
+    Conid lookups run in parallel (ThreadPoolExecutor) to avoid serial
+    round-trips killing performance.
+
+    Maturities expiring within min_days_to_expiry are skipped: near-expiry
+    contracts trade at the minimum tick with near-zero time value, and the
+    IV inversion turns that tick-noise into garbage that wrecks the surface.
     """
     rows = []
 
@@ -481,19 +513,23 @@ def get_options_table(
         s, r, m = args
         return (s, r), get_option_conid(client, conid, m, s, r)
 
-    for month in months[:6]:
+    tradable_months = [m for m in months if _days_to_expiry(m) >= min_days_to_expiry]
+    for month in tradable_months[:6]:
         strikes = get_strikes(client, conid, month)
         if not strikes:
             logger.warning("No strikes for month %s", month)
             continue
 
-        lo, hi = spot * (1 - moneyness_band), spot * (1 + moneyness_band)
+        lo, hi = spot * (1 - put_band), spot * (1 + call_band)
         band = [k for k in strikes if lo <= k <= hi]
         if not band:
             band = [min(strikes, key=lambda k: abs(k - spot))]
+
+        atm_strike = min(band, key=lambda k: abs(k - spot))
         if len(band) > max_strikes:
-            band = sorted(band, key=lambda k: abs(k - spot))[:max_strikes]
-        band = sorted(band)
+            band = _sample_evenly(sorted(band), max_strikes, keep=atm_strike)
+        else:
+            band = sorted(band)
 
         atm_strike = min(band, key=lambda k: abs(k - spot))
 
@@ -555,8 +591,8 @@ def get_options_table(
                 "IV %":          _num(s.get("7636")),
                 "Delta":         _num(s.get("7308")),
                 "Gamma":         _num(s.get("7309")),
-                "Vega":          _num(s.get("7310")),
-                "Theta":         _num(s.get("7311")),
+                "Theta":         _num(s.get("7310")),
+                "Vega":          _num(s.get("7311")),
             })
 
     logger.info("Options table: %d rows for %d months", len(rows), len(months[:6]))

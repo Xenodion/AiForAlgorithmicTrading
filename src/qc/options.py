@@ -83,6 +83,18 @@ def _check_iv(row: Any) -> list[str]:
     return []
 
 
+# Quotes priced at/near the exchange minimum tick carry no usable information:
+# the inversion turns 1-2 ticks of premium into noisy, extreme implied vols
+# that distort the surface wings. Reject anything below this premium.
+MIN_PREMIUM = 0.5
+
+
+def _check_min_premium(reference_price: float | None) -> list[str]:
+    if reference_price is not None and reference_price < MIN_PREMIUM:
+        return ["below_min_premium"]
+    return []
+
+
 def evaluate_quote(row: Any, spot: float) -> dict[str, Any]:
     mid = mid_price(row)
     bid = _as_float(row.get("Bid"))
@@ -101,6 +113,7 @@ def evaluate_quote(row: Any, spot: float) -> dict[str, Any]:
         reasons.extend(check(row))
     reasons.extend(_check_reference_price(row, spot, mid))
     reasons.extend(_check_iv(row))
+    reasons.extend(_check_min_premium(reference_price))
     reasons = list(dict.fromkeys(reasons))
 
     hard_reject = {
@@ -110,6 +123,7 @@ def evaluate_quote(row: Any, spot: float) -> dict[str, Any]:
         "implausible_iv",
         "below_intrinsic",
         "extreme_spread",
+        "below_min_premium",
     }
     caution = {
         "wide_spread",

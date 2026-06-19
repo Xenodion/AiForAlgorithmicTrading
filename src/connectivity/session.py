@@ -112,7 +112,7 @@ class IBKRClient:
         Common field IDs:
           31=last, 84=bid, 86=ask, 70=high, 71=low, 82=chg, 83=chg%
           85=ask size (NOT ask price)
-          7308=delta, 7309=gamma, 7310=vega, 7311=theta, 7636=IV%
+          7308=delta, 7309=gamma, 7310=theta, 7311=vega, 7636=IV%
         """
         params = {
             "conids": ",".join(str(c) for c in conids),

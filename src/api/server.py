@@ -448,14 +448,61 @@ def _option_diagnostics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _recompute_surface_iv(
+    rows: list[dict[str, Any]],
+    forwards_by_maturity: dict[str, float],
+    spot: float,
+    rate: float,
+) -> list[dict[str, Any]]:
+    """
+    Re-invert every surface-eligible quote to implied vol against that
+    maturity's forward (Black-76 via an effective-spot transform), so the
+    whole surface uses ONE consistent inversion. This removes the seam caused
+    by mixing IBKR's forward-based IV (field 7636) with the spot-based BS
+    fallback, and makes the put and call agree at the ATM strike by put-call
+    parity. Falls back to the row's existing IV % when the inversion fails.
+    """
+    out = []
+    for row in rows:
+        new_row = dict(row)
+        if row.get("Surface Eligible"):
+            price = row.get("Mid") or row.get("QC Reference Price")
+            try:
+                price = float(price)
+                strike = float(row.get("Strike"))
+            except (TypeError, ValueError):
+                price, strike = None, None
+            if price and price > 0 and strike and strike > 0:
+                maturity = str(row.get("Maturity"))
+                t = _maturity_years(maturity)
+                forward = forwards_by_maturity.get(maturity) or spot * math.exp(rate * t)
+                effective_spot = forward * math.exp(-rate * t)
+                option_type = "put" if "put" in str(row.get("Type", "")).lower() else "call"
+                result = solve_implied_volatility(
+                    price=price,
+                    spot=effective_spot,
+                    strike=strike,
+                    maturity=t,
+                    rate=rate,
+                    option_type=option_type,
+                )
+                if result["implied_vol"] is not None:
+                    new_row["IV %"] = round(result["implied_vol"] * 100, 4)
+                    new_row["IV Source"] = "BS forward"
+                    new_row["IV Status"] = "converged"
+        out.append(new_row)
+    return out
+
+
 def _surface_payload(rt: Runtime, notional: float, rate: float = 0.03) -> dict[str, Any]:
     rows = _cached_option_rows(rt, notional)
     reference_spot = next((row.get("Reference Spot") for row in rows if row.get("Reference Spot")), None)
     spot = get_spot(rt.client, rt.index["conid"])
     spot_price = float(spot.get("last") or spot.get("close") or reference_spot or 5000)
     forward_payload = build_forward_curve(rows, spot=spot_price, rate=rate)
+    surface_rows = _recompute_surface_iv(rows, forward_payload["forwards"], spot_price, rate)
     surface_payload = build_surface(
-        rows,
+        surface_rows,
         spot=spot_price,
         rate=rate,
         forwards_by_maturity=forward_payload["forwards"],
