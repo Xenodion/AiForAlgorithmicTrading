@@ -15,6 +15,18 @@ connection:
 session:
   tickle_interval_seconds: 60   # Ping the gateway to keep the session alive
 
+order_routing:
+  enabled: true                  # Live routing to IBKR paper; kill-switch env var IBKR_ORDER_ROUTING_KILL_SWITCH=1 disables
+  paper_only: true               # Blocks non-paper accounts unless explicitly changed
+  max_quantity: 10
+  allowed_order_types:
+    - LIMIT
+    - MARKET
+  allowed_tifs:
+    - DAY
+  confirmation_phrase: "SEND ORDER"
+  audit_path: "data/audit/orders.jsonl"
+
 market_data:
   snapshot_cadence_seconds: 5
   # Field IDs for market data snapshots (IBKR Client Portal field codes)
@@ -27,6 +39,6 @@ market_data:
     close:   "7284"
     delta:   "7308"
     gamma:   "7309"
-    vega:    "7310"
-    theta:   "7311"
+    theta:   "7310"
+    vega:    "7311"
     iv:      "7636"

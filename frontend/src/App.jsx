@@ -1989,29 +1989,55 @@ function OrdersView({ bootstrap }) {
     validation: null,
     dryRun: null,
     submit: null,
+    brokerReply: null,
     lastAction: null,
     loading: false,
     error: null,
   });
   const [ticket, setTicket] = useState({
+    accountId: '',
     underlying: bootstrap?.index?.symbol ?? 'ESTX50',
+    conid: '',
     side: 'BUY',
     quantity: 1,
     orderType: 'LIMIT',
     limitPrice: 5000,
+    tif: 'DAY',
+    outsideRTH: false,
+    confirmation: '',
   });
 
   useEffect(() => {
     if (bootstrap?.index?.symbol) {
-      setTicket((current) => ({ ...current, underlying: bootstrap.index.symbol }));
+      setTicket((current) => ({
+        ...current,
+        underlying: bootstrap?.index?.symbol ?? current.underlying,
+      }));
     }
   }, [bootstrap?.index?.symbol]);
+
+  useEffect(() => {
+    if (preview.data?.defaultAccountId && !ticket.accountId) {
+      setTicket((current) => ({ ...current, accountId: preview.data.defaultAccountId }));
+    }
+  }, [preview.data?.defaultAccountId, ticket.accountId]);
 
   const runOrderAction = async (kind) => {
     setOrderResult((current) => ({ ...current, loading: true, error: null }));
     try {
-      const path = kind === 'dryRun' ? '/api/orders/dry-run' : kind === 'submit' ? '/api/orders/submit' : '/api/orders/validate';
-      const data = await apiPost(path, ticket);
+      let path = '/api/orders/validate';
+      let payload = ticket;
+      if (kind === 'dryRun') path = '/api/orders/dry-run';
+      if (kind === 'submit') path = '/api/orders/submit';
+      if (kind === 'brokerReply') {
+        path = '/api/orders/reply';
+        payload = {
+          replyId: orderResult.submit?.replyId,
+          confirmed: true,
+          confirmation: ticket.confirmation,
+        };
+      }
+      const data = await apiPost(path, payload);
       setOrderResult((current) => ({ ...current, [kind]: data, lastAction: kind, loading: false, error: null }));
     } catch (error) {
       setOrderResult((current) => ({ ...current, loading: false, error }));
@@ -2034,6 +2060,9 @@ function OrdersView({ bootstrap }) {
       Code: item,
     })),
   ];
+  const routingEnabled = Boolean(preview.data?.routingEnabled);
+  const confirmationPhrase = preview.data?.confirmationPhrase ?? 'SEND ORDER';
+  const submitDisabled = orderResult.loading || !routingEnabled || ticket.confirmation !== confirmationPhrase;
 
   return (
     <div className="view-stack">
@@ -2048,13 +2077,29 @@ function OrdersView({ bootstrap }) {
             <MetricTile label="Safety version" value={preview.data?.safetyVersion ?? '—'} />
           </div>
         )}
-        <Insight>Real broker routing is locked off. Use Validate to check the ticket, Dry-run to simulate submission — no order reaches the broker.</Insight>
+        <Insight>
+          Routing is controlled server-side. To send a live paper order, enable routing in config, choose an account and conid, then type{' '}
+          <strong>{confirmationPhrase}</strong>.
+        </Insight>
       </Panel>
 
       <Panel title="Order ticket preview" icon={Send}>
         <div className="form-grid">
+          <Field label="Account">
+            <select value={ticket.accountId} onChange={(event) => setTicket((v) => ({ ...v, accountId: event.target.value }))}>
+              <option value="">Select account</option>
+              {(preview.data?.accounts ?? []).map((account) => (
+                <option key={account} value={account}>
+                  {account}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="Underlying">
             <input value={ticket.underlying} onChange={(event) => setTicket((v) => ({ ...v, underlying: event.target.value }))} />
+          </Field>
+          <Field label="IBKR conid">
+            <input type="number" value={ticket.conid} onChange={(event) => setTicket((v) => ({ ...v, conid: Number(event.target.value) }))} />
           </Field>
           <Field label="Side">
             <Segmented value={ticket.side} options={['BUY', 'SELL']} onChange={(side) => setTicket((v) => ({ ...v, side }))} />
@@ -2070,6 +2115,18 @@ function OrdersView({ bootstrap }) {
               <input type="number" value={ticket.limitPrice} onChange={(event) => setTicket((v) => ({ ...v, limitPrice: Number(event.target.value) }))} />
             </Field>
           )}
+          <Field label="Time in force">
+            <Segmented value={ticket.tif} options={preview.data?.allowedTifs?.length ? preview.data.allowedTifs : ['DAY']} onChange={(tif) => setTicket((v) => ({ ...v, tif }))} />
+          </Field>
+          <Field label="Outside RTH">
+            <select value={ticket.outsideRTH ? 'yes' : 'no'} onChange={(event) => setTicket((v) => ({ ...v, outsideRTH: event.target.value === 'yes' }))}>
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+          </Field>
+          <Field label={`Confirmation (${confirmationPhrase})`}>
+            <input value={ticket.confirmation} onChange={(event) => setTicket((v) => ({ ...v, confirmation: event.target.value }))} />
+          </Field>
         </div>
         <div className="action-row">
           <button className="secondary-button" type="button" onClick={() => runOrderAction('validation')} disabled={orderResult.loading}>
@@ -2080,9 +2137,9 @@ function OrdersView({ bootstrap }) {
             <Play size={16} />
             Dry-run
           </button>
-          <button className="secondary-button disabled-button" type="button" disabled>
+          <button className={routingEnabled ? 'primary-button danger-button' : 'secondary-button disabled-button'} type="button" onClick={() => runOrderAction('submit')} disabled={submitDisabled}>
             <Send size={16} />
-            Live routing disabled
+            {routingEnabled ? 'Submit to IBKR' : 'Live routing disabled'}
           </button>
         </div>
         {orderResult.error && <ErrorBlock error={orderResult.error} />}
@@ -2117,6 +2174,24 @@ function OrdersView({ bootstrap }) {
               />
             )}
           </>
+        )}
+        {orderResult.submit && (
+          <Insight>
+            <strong>Submit {orderResult.submit.submitId}</strong> · {orderResult.submit.status} — {orderResult.submit.message}
+          </Insight>
+        )}
+        {orderResult.submit?.replyId && (
+          <div className="action-row">
+            <button className="primary-button danger-button" type="button" onClick={() => runOrderAction('brokerReply')} disabled={submitDisabled}>
+              <Send size={16} />
+              Confirm broker reply
+            </button>
+          </div>
+        )}
+        {orderResult.brokerReply && (
+          <Insight>
+            Broker reply {orderResult.brokerReply.replyId}: <strong>{orderResult.brokerReply.status}</strong>
+          </Insight>
         )}
       </Panel>
 
