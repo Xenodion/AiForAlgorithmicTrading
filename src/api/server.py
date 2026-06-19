@@ -543,11 +543,26 @@ def validation_latest():
 @app.get("/api/operations/summary")
 def operations_summary():
     latest = latest_run_summary()
+    snapshot = None
+    try:
+        rt = runtime()
+        snapshot = _ttl("option-snapshot:10", 60, lambda: _option_snapshot_payload(rt, notional=10))
+    except Exception:
+        pass
     return _clean({
         "latestRun": latest,
         "validation": latest_run_validation(latest),
         "orderSafetyVersion": ORDER_SAFETY_VERSION,
         "routingEnabled": False,
+        "snapshot": {
+            "version": snapshot.get("snapshotVersion") if snapshot else None,
+            "ts": snapshot.get("snapshotTs") if snapshot else None,
+            "underlying": snapshot.get("underlying") if snapshot else None,
+            "spot": snapshot.get("spot") if snapshot else None,
+            "rowCount": snapshot["diagnostics"]["rowCount"] if snapshot else None,
+            "referenceCounts": snapshot["diagnostics"]["referenceCounts"] if snapshot else None,
+            "missingReference": snapshot["diagnostics"]["missingReference"] if snapshot else None,
+        } if snapshot else None,
     })
 
 

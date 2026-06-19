@@ -2107,6 +2107,7 @@ function OperationsView() {
   const latestRun = summary.data?.latestRun ?? {};
   const manifest = latestRun.manifest ?? {};
   const validation = summary.data?.validation ?? {};
+  const snapshot = summary.data?.snapshot ?? null;
   const artifactRows = Object.entries(manifest.artifacts ?? {}).map(([name, path]) => ({ Name: name, Path: path }));
 
   const reload = () => {
@@ -2165,6 +2166,29 @@ function OperationsView() {
             { key: 'detail', label: 'Detail' },
           ]}
         />
+      </Panel>
+
+      <Panel title="Market-state snapshot" icon={Layers3}>
+        {!snapshot ? (
+          <div className="table-empty">No snapshot yet — loads automatically after first surface build.</div>
+        ) : (
+          <>
+            <div className="metric-grid four">
+              <MetricTile label="Underlying" value={snapshot.underlying ?? '—'} />
+              <MetricTile label="Spot" value={formatNumber(snapshot.spot, 2)} />
+              <MetricTile label="Rows" value={formatNumber(snapshot.rowCount, 0)} />
+              <MetricTile label="Missing ref." value={formatNumber(snapshot.missingReference, 0)} tone={snapshot.missingReference > 0 ? 'warn' : 'good'} />
+            </div>
+            <DataTable
+              rows={Object.entries(snapshot.referenceCounts ?? {}).map(([type, count]) => ({ 'Reference type': type, Count: count }))}
+              columns={[{ key: 'Reference type' }, { key: 'Count' }]}
+              maxHeight={200}
+            />
+            <Insight>
+              Snapshot version <strong>{snapshot.version}</strong> · built at {snapshot.ts?.slice(0, 19).replace('T', ' ')} UTC
+            </Insight>
+          </>
+        )}
       </Panel>
 
       <Panel title="Artifacts" icon={Database}>
