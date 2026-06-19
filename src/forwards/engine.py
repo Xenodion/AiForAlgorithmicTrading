@@ -16,14 +16,17 @@ from typing import Any
 FORWARD_MODEL_VERSION = "parity-forward-v1"
 
 
+def _third_friday(year: int, month_num: int) -> date:
+    first = date(year, month_num, 1)
+    days_until_friday = (4 - first.weekday()) % 7
+    return first + timedelta(days=days_until_friday + 14)
+
+
 def maturity_years(month: str, today: date | None = None) -> float:
     today = today or date.today()
     year = int(str(month)[:4])
     month_num = int(str(month)[4:6])
-    if month_num == 12:
-        expiry = date(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        expiry = date(year, month_num + 1, 1) - timedelta(days=1)
+    expiry = _third_friday(year, month_num)
     return max((expiry - today).days / 365.0, 1 / 365.0)
 
 
@@ -152,4 +155,3 @@ def build_forward_curve(
         "rows": rows,
         "diagnostics": diagnostics,
     }
-

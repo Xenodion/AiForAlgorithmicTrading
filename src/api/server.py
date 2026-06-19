@@ -40,7 +40,14 @@ from src.data.fetcher import (
 )
 from src.forwards.engine import build_forward_curve
 from src.iv.solver import solve_implied_volatility
-from src.orders.safety import ORDER_SAFETY_VERSION, dry_run_order, submit_order, validate_order
+from src.orders.safety import (
+    ORDER_SAFETY_VERSION,
+    dry_run_order,
+    load_order_routing_config,
+    reply_order,
+    submit_order,
+    validate_order,
+)
 from src.qc.options import QUOTE_QC_VERSION, apply_quote_qc
 from src.risk.portfolio import (
     backtest_report,
@@ -137,11 +144,23 @@ class DeleteStrategyRequest(BaseModel):
 
 
 class OrderTicket(BaseModel):
+    accountId: str | None = None
     underlying: str = "ESTX50"
+    conid: int | None = None
     side: Literal["BUY", "SELL"] = "BUY"
     quantity: float = Field(default=1, gt=0)
     orderType: Literal["LIMIT", "MARKET"] = "LIMIT"
     limitPrice: float | None = None
+    tif: Literal["DAY", "GTC"] = "DAY"
+    outsideRTH: bool = False
+    confirmation: str | None = None
+    clientOrderId: str | None = None
+
+
+class OrderReplyRequest(BaseModel):
+    replyId: str = Field(min_length=1)
+    confirmed: bool = True
+    confirmation: str = ""
 
 
 @app.on_event("startup")
@@ -237,10 +256,9 @@ def _month_label(month: str) -> str:
 def _maturity_years(month: str) -> float:
     year = int(str(month)[:4])
     month_num = int(str(month)[4:6])
-    if month_num == 12:
-        expiry = date(year + 1, 1, 1) - timedelta(days=1)
-    else:
-        expiry = date(year, month_num + 1, 1) - timedelta(days=1)
+    first = date(year, month_num, 1)
+    days_until_friday = (4 - first.weekday()) % 7
+    expiry = first + timedelta(days=days_until_friday + 14)
     return max((expiry - date.today()).days / 365.0, 1 / 365.0)
 
 
@@ -840,6 +858,8 @@ def risk_backtest_report(payload: BacktestRequest):
 
 @app.get("/api/orders/preview")
 def orders_preview():
+    routing = load_order_routing_config(CONFIG_PATH)
+    accounts = []
     try:
         rt = runtime()
         accounts = rt.client.get_accounts()
@@ -870,37 +890,85 @@ def orders_preview():
             for p in raw_positions
         ]
     except Exception:
+        account_id = None
         open_orders = []
         positions = []
 
     return _clean({
+        "accounts": accounts,
+        "defaultAccountId": account_id,
         "openOrders": open_orders,
         "positions": positions,
-        "routingEnabled": False,
+        "routingEnabled": routing["enabled"],
+        "paperOnly": routing["paper_only"],
+        "maxQuantity": routing["max_quantity"],
+        "allowedOrderTypes": routing["allowed_order_types"],
+        "allowedTifs": routing["allowed_tifs"],
+        "confirmationPhrase": routing["confirmation_phrase"],
         "safetyVersion": ORDER_SAFETY_VERSION,
     })
 
 
 @app.post("/api/orders/validate")
 def orders_validate(ticket: OrderTicket):
-    return _clean(validate_order(ticket.model_dump()))
+    routing = load_order_routing_config(CONFIG_PATH)
+    try:
+        accounts = runtime().client.get_accounts()
+    except Exception:
+        accounts = []
+    return _clean(validate_order(ticket.model_dump(), routing, accounts))
 
 
 @app.post("/api/orders/dry-run")
 def orders_dry_run(ticket: OrderTicket):
-    return _clean(dry_run_order(ticket.model_dump()))
+    routing = load_order_routing_config(CONFIG_PATH)
+    try:
+        accounts = runtime().client.get_accounts()
+    except Exception:
+        accounts = []
+    return _clean(dry_run_order(ticket.model_dump(), routing, accounts))
 
 
 @app.post("/api/orders/submit")
 def orders_submit(ticket: OrderTicket):
-    return _clean(submit_order(ticket.model_dump()))
+    try:
+        rt = runtime()
+        accounts = rt.client.get_accounts()
+        routing = load_order_routing_config(CONFIG_PATH)
+        return _clean(submit_order(rt.client, ticket.model_dump(), routing, accounts))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@app.post("/api/orders/reply")
+def orders_reply(payload: OrderReplyRequest):
+    try:
+        rt = runtime()
+        routing = load_order_routing_config(CONFIG_PATH)
+        return _clean(reply_order(rt.client, payload.replyId, payload.confirmed, routing, payload.confirmation))
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 @app.post("/api/orders/cancel")
-def orders_cancel(order_id: str = Query(...)):
-    return {
-        "orderId": order_id,
-        "status": "not_routed",
-        "routingEnabled": False,
-        "message": "No live order exists because real routing is disabled.",
-    }
+def orders_cancel(order_id: str = Query(...), account_id: str = Query(...), confirmation: str = Query("")):
+    routing = load_order_routing_config(CONFIG_PATH)
+    if not routing["enabled"]:
+        return {
+            "orderId": order_id,
+            "status": "blocked",
+            "routingEnabled": False,
+            "message": "Real order routing is disabled by configuration.",
+        }
+    if confirmation != routing["confirmation_phrase"]:
+        return {
+            "orderId": order_id,
+            "status": "blocked",
+            "routingEnabled": True,
+            "message": "Confirmation phrase is required.",
+        }
+    try:
+        response = runtime().client.cancel_order(account_id, order_id)
+        return _clean({"orderId": order_id, "status": "cancel_requested", "routingEnabled": True, "brokerResponse": response})
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc

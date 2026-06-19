@@ -92,19 +92,19 @@ def latest_run_validation(latest_run: dict[str, Any]) -> dict[str, Any]:
             "pass" if calendar_breaks == 0 else "fail",
             calendar_breaks,
             "0 violations",
-            "Total variance should not decrease across maturities for the same strike.",
+            "Total variance should not decrease across maturities for the same moneyness coordinate.",
         )
     )
 
     display_grid = surface.get("displayGrid", {})
-    display_strikes = int(display_grid.get("strikeCount") or 0)
+    display_coordinates = int(display_grid.get("coordinateCount") or display_grid.get("strikeCount") or 0)
     checks.append(
         _check(
             "surface_common_domain",
-            "pass" if display_strikes >= 5 else "warn" if display_strikes >= 2 else "fail",
-            display_strikes,
-            "pass >= 5 strikes",
-            "Common strike domain used for the no-hole displayed surface.",
+            "pass" if display_coordinates >= 5 else "warn" if display_coordinates >= 2 else "fail",
+            display_coordinates,
+            "pass >= 5 coordinates",
+            "Common log-moneyness domain used for the no-hole displayed surface.",
         )
     )
 
@@ -145,4 +145,3 @@ def latest_run_validation(latest_run: dict[str, Any]) -> dict[str, Any]:
         "checks": checks,
         "summary": counts,
     }
-

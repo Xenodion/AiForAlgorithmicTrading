@@ -62,6 +62,12 @@ class IBKRClient:
         resp.raise_for_status()
         return resp.json()
 
+    def delete(self, endpoint: str, json: dict | None = None) -> Any:
+        url = f"{self.base_url}/{endpoint.lstrip('/')}"
+        resp = self._session.delete(url, json=json, verify=self.verify, timeout=self.timeout)
+        resp.raise_for_status()
+        return resp.json() if resp.text else {}
+
     # ------------------------------------------------------------------
     # Session management
     # ------------------------------------------------------------------
@@ -153,6 +159,18 @@ class IBKRClient:
             return result if isinstance(result, list) else []
         except Exception:
             return []
+
+    def place_order(self, account_id: str, order: dict[str, Any]) -> Any:
+        """Submit an order through Client Portal Gateway."""
+        return self.post(f"/iserver/account/{account_id}/orders", json={"orders": [order]})
+
+    def reply_order(self, reply_id: str, confirmed: bool) -> Any:
+        """Reply to an IBKR order confirmation prompt."""
+        return self.post(f"/iserver/reply/{reply_id}", json={"confirmed": confirmed})
+
+    def cancel_order(self, account_id: str, order_id: str) -> Any:
+        """Cancel an open order."""
+        return self.delete(f"/iserver/account/{account_id}/order/{order_id}")
 
     # ------------------------------------------------------------------
     # Option chains

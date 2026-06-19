@@ -63,7 +63,7 @@ const tabMeta = {
   surface: {
     eyebrow: 'Volatility model',
     title: 'Implied surface',
-    description: '3D surface over strikes, smile per maturity and ATM term structure.',
+    description: '3D surface over forward moneyness, smile per maturity and ATM term structure.',
   },
   operations: {
     eyebrow: 'Operations',
@@ -225,9 +225,9 @@ const moduleHelp = {
     ],
   },
   '3D volatility surface': {
-    summary: 'Main implied surface displayed across delta, maturity and IV.',
+    summary: 'Main implied surface displayed across forward log-moneyness, maturity and IV.',
     bullets: [
-      'Shows the full volatility topology across delta buckets.',
+      'Shows the full volatility topology on a forward-adjusted moneyness grid.',
       'Observed points help distinguish raw data from interpolation.',
     ],
   },
@@ -298,7 +298,7 @@ function assistantAnswer(input, activeTab) {
   }
 
   if (text.includes('surface') || text.includes('smile') || text.includes('term') || text.includes('iv')) {
-    return `${pageHint}\n\nHow to use the surface:\n1. Look at the ATM term structure first for the general volatility level.\n2. Then check the smile to see if puts or calls are relatively expensive.\n3. Check the diagnostics: accepted points, rejections, common strikes, calendar violations.\n4. Avoid building a strategy on a sparse or last-only zone.\n\nA surface helps you choose where option pricing is exploitable, not predict direction alone.`;
+    return `${pageHint}\n\nHow to use the surface:\n1. Look at the ATM term structure first for the general volatility level.\n2. Then check the smile to see if puts or calls are relatively expensive.\n3. Check the diagnostics: accepted points, rejections, common moneyness domain, calendar violations.\n4. Avoid building a strategy on a sparse or last-only zone.\n\nA surface helps you choose where option pricing is exploitable, not predict direction alone.`;
   }
 
   if (text.includes('first') || text.includes('start') || text.includes('conserv') || text.includes('strategy') || text.includes('strateg')) {
@@ -306,7 +306,7 @@ function assistantAnswer(input, activeTab) {
   }
 
   if (text.includes('warning') || text.includes('error') || text.includes('empty') || text.includes('data')) {
-    return `When a block looks suspicious, start from data quality:\n\n1. Ops tab: check the global status and warn/fail checks.\n2. Options chain: check QC Status, QC Reasons and Surface Eligible.\n3. Surface: check common strikes, rejected rows and calendar breaks.\n4. If many last-only or empty quotes: don't force a strategy on those points.\n\nA reliable strategy starts with usable data.`;
+    return `When a block looks suspicious, start from data quality:\n\n1. Ops tab: check the global status and warn/fail checks.\n2. Options chain: check QC Status, QC Reasons and Surface Eligible.\n3. Surface: check common moneyness domain, rejected rows and calendar breaks.\n4. If many last-only or empty quotes: don't force a strategy on those points.\n\nA reliable strategy starts with usable data.`;
   }
 
   return `${pageHint}\n\nI can help you formulate a strategy if you give me three things: your market scenario, your time horizon, and the risk you want to limit. Example: "I want a conservative strategy if the index rises slightly over 1 month with capped loss".`;
@@ -408,20 +408,23 @@ function buildSurface(rows) {
 
 function normalizeSurface(surfaceData, rows) {
   const grid = surfaceData?.grid;
+  const coordinates = grid?.coordinates ?? grid?.logMoneyness ?? grid?.strikes;
   if (
     grid?.maturities?.length >= 2 &&
-    grid?.strikes?.length >= 2 &&
+    coordinates?.length >= 2 &&
     Array.isArray(grid?.z) &&
     grid.z.length >= 2
   ) {
     return {
-      points: rows.filter(isSurfaceIvRow),
+      points: surfaceData?.ivPoints?.length ? surfaceData.ivPoints : rows.filter(isSurfaceIvRow),
       maturities: grid.maturities,
-      strikes: grid.strikes,
+      coordinates,
+      coordinateLabel: 'Log moneyness',
       z: grid.z,
     };
   }
-  return buildSurface(rows);
+  const fallback = buildSurface(rows);
+  return { ...fallback, coordinates: fallback.strikes, coordinateLabel: 'Strike' };
 }
 
 function App() {
@@ -1235,34 +1238,51 @@ function fmtMaturity(m) {
   return s.length === 6 ? `${s.slice(0, 4)}-${s.slice(4, 6)}` : s;
 }
 
+function fmtLogMoneyness(value) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return '—';
+  return `${formatSigned(number * 100, 2)}%`;
+}
+
 function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
   const surface = useMemo(() => normalizeSurface(surfaceData, rows), [surfaceData, rows]);
   if (!surface.points.length) {
     return <div className="table-empty">Surface requires rows with IV % data.</div>;
   }
 
-  const enoughGrid = surface.maturities.length >= 2 && surface.strikes.length >= 2;
+  const coordinateLabel = surface.coordinateLabel ?? 'Strike';
+  const yValues = surface.coordinates ?? surface.strikes;
+  const pointY = surface.points.map((row) => (
+    coordinateLabel === 'Log moneyness' ? Number(row['Log Moneyness']) : Number(row.Strike)
+  ));
+  const pointText = surface.points.map((row) => (
+    `Strike=${formatNumber(row.Strike, 0)}<br>Log moneyness=${fmtLogMoneyness(row['Log Moneyness'])}`
+  ));
+  const hoverY = coordinateLabel === 'Log moneyness' ? '%{y:.4f}' : '%{y}';
+  const enoughGrid = surface.maturities.length >= 2 && yValues.length >= 2;
   const data = enoughGrid
     ? [
         {
           type: 'surface',
           x: surface.maturities.map(fmtMaturity),
-          y: surface.strikes,
+          y: yValues,
           z: surface.z,
           colorscale: 'RdYlGn',
           reversescale: false,
+          connectgaps: false,
           colorbar: { title: 'IV %', thickness: 14 },
-          hovertemplate: 'Maturity=%{x}<br>Strike=%{y}<br>IV=%{z:.2f}%<extra></extra>',
+          hovertemplate: `Maturity=%{x}<br>${coordinateLabel}=${hoverY}<br>IV=%{z:.2f}%<extra></extra>`,
           name: 'IV surface',
         },
         {
           type: 'scatter3d',
           mode: 'markers',
           x: surface.points.map((row) => fmtMaturity(row.Maturity)),
-          y: surface.points.map((row) => Number(row.Strike)),
+          y: pointY,
           z: surface.points.map((row) => Number(row['IV %'])),
+          text: pointText,
           marker: { size: 3, color: '#f5d76e', opacity: 0.85 },
-          hovertemplate: 'Observed<br>Maturity=%{x}<br>Strike=%{y}<br>IV=%{z:.2f}%<extra></extra>',
+          hovertemplate: `Observed<br>Maturity=%{x}<br>${coordinateLabel}=${hoverY}<br>%{text}<br>IV=%{z:.2f}%<extra></extra>`,
           name: 'Observed quotes',
         },
       ]
@@ -1271,15 +1291,16 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
           type: 'scatter3d',
           mode: 'markers',
           x: surface.points.map((row) => fmtMaturity(row.Maturity)),
-          y: surface.points.map((row) => Number(row.Strike)),
+          y: pointY,
           z: surface.points.map((row) => Number(row['IV %'])),
+          text: pointText,
           marker: {
             size: 5,
             color: surface.points.map((row) => Number(row['IV %'])),
             colorscale: 'RdYlGn',
             colorbar: { title: 'IV %', thickness: 14 },
           },
-          hovertemplate: 'Maturity=%{x}<br>Strike=%{y}<br>IV=%{z:.2f}%<extra></extra>',
+          hovertemplate: `Maturity=%{x}<br>${coordinateLabel}=${hoverY}<br>%{text}<br>IV=%{z:.2f}%<extra></extra>`,
         },
       ];
 
@@ -1291,7 +1312,7 @@ function SurfaceChart({ rows = [], surfaceData = null, height = 560 }) {
         height,
         scene: {
           xaxis: { title: 'Maturity', gridcolor: '#263937' },
-          yaxis: { title: 'Strike', gridcolor: '#263937' },
+          yaxis: { title: coordinateLabel, gridcolor: '#263937' },
           zaxis: { title: 'IV (%)', gridcolor: '#263937' },
           camera: { eye: { x: 1.55, y: 1.55, z: 0.95 } },
         },
@@ -1914,29 +1935,55 @@ function OrdersView({ bootstrap }) {
     validation: null,
     dryRun: null,
     submit: null,
+    brokerReply: null,
     lastAction: null,
     loading: false,
     error: null,
   });
   const [ticket, setTicket] = useState({
+    accountId: '',
     underlying: bootstrap?.index?.symbol ?? 'ESTX50',
+    conid: '',
     side: 'BUY',
     quantity: 1,
     orderType: 'LIMIT',
     limitPrice: 5000,
+    tif: 'DAY',
+    outsideRTH: false,
+    confirmation: '',
   });
 
   useEffect(() => {
     if (bootstrap?.index?.symbol) {
-      setTicket((current) => ({ ...current, underlying: bootstrap.index.symbol }));
+      setTicket((current) => ({
+        ...current,
+        underlying: bootstrap?.index?.symbol ?? current.underlying,
+      }));
     }
   }, [bootstrap?.index?.symbol]);
+
+  useEffect(() => {
+    if (preview.data?.defaultAccountId && !ticket.accountId) {
+      setTicket((current) => ({ ...current, accountId: preview.data.defaultAccountId }));
+    }
+  }, [preview.data?.defaultAccountId, ticket.accountId]);
 
   const runOrderAction = async (kind) => {
     setOrderResult((current) => ({ ...current, loading: true, error: null }));
     try {
-      const path = kind === 'dryRun' ? '/api/orders/dry-run' : kind === 'submit' ? '/api/orders/submit' : '/api/orders/validate';
-      const data = await apiPost(path, ticket);
+      let path = '/api/orders/validate';
+      let payload = ticket;
+      if (kind === 'dryRun') path = '/api/orders/dry-run';
+      if (kind === 'submit') path = '/api/orders/submit';
+      if (kind === 'brokerReply') {
+        path = '/api/orders/reply';
+        payload = {
+          replyId: orderResult.submit?.replyId,
+          confirmed: true,
+          confirmation: ticket.confirmation,
+        };
+      }
+      const data = await apiPost(path, payload);
       setOrderResult((current) => ({ ...current, [kind]: data, lastAction: kind, loading: false, error: null }));
     } catch (error) {
       setOrderResult((current) => ({ ...current, loading: false, error }));
@@ -1959,6 +2006,9 @@ function OrdersView({ bootstrap }) {
       Code: item,
     })),
   ];
+  const routingEnabled = Boolean(preview.data?.routingEnabled);
+  const confirmationPhrase = preview.data?.confirmationPhrase ?? 'SEND ORDER';
+  const submitDisabled = orderResult.loading || !routingEnabled || ticket.confirmation !== confirmationPhrase;
 
   return (
     <div className="view-stack">
@@ -1973,13 +2023,29 @@ function OrdersView({ bootstrap }) {
             <MetricTile label="Safety version" value={preview.data?.safetyVersion ?? '—'} />
           </div>
         )}
-        <Insight>Real broker routing is locked off. Use Validate to check the ticket, Dry-run to simulate submission — no order reaches the broker.</Insight>
+        <Insight>
+          Routing is controlled server-side. To send a live paper order, enable routing in config, choose an account and conid, then type{' '}
+          <strong>{confirmationPhrase}</strong>.
+        </Insight>
       </Panel>
 
       <Panel title="Order ticket preview" icon={Send}>
         <div className="form-grid">
+          <Field label="Account">
+            <select value={ticket.accountId} onChange={(event) => setTicket((v) => ({ ...v, accountId: event.target.value }))}>
+              <option value="">Select account</option>
+              {(preview.data?.accounts ?? []).map((account) => (
+                <option key={account} value={account}>
+                  {account}
+                </option>
+              ))}
+            </select>
+          </Field>
           <Field label="Underlying">
             <input value={ticket.underlying} onChange={(event) => setTicket((v) => ({ ...v, underlying: event.target.value }))} />
+          </Field>
+          <Field label="IBKR conid">
+            <input type="number" value={ticket.conid} onChange={(event) => setTicket((v) => ({ ...v, conid: Number(event.target.value) }))} />
           </Field>
           <Field label="Side">
             <Segmented value={ticket.side} options={['BUY', 'SELL']} onChange={(side) => setTicket((v) => ({ ...v, side }))} />
@@ -1995,6 +2061,18 @@ function OrdersView({ bootstrap }) {
               <input type="number" value={ticket.limitPrice} onChange={(event) => setTicket((v) => ({ ...v, limitPrice: Number(event.target.value) }))} />
             </Field>
           )}
+          <Field label="Time in force">
+            <Segmented value={ticket.tif} options={preview.data?.allowedTifs?.length ? preview.data.allowedTifs : ['DAY']} onChange={(tif) => setTicket((v) => ({ ...v, tif }))} />
+          </Field>
+          <Field label="Outside RTH">
+            <select value={ticket.outsideRTH ? 'yes' : 'no'} onChange={(event) => setTicket((v) => ({ ...v, outsideRTH: event.target.value === 'yes' }))}>
+              <option value="no">No</option>
+              <option value="yes">Yes</option>
+            </select>
+          </Field>
+          <Field label={`Confirmation (${confirmationPhrase})`}>
+            <input value={ticket.confirmation} onChange={(event) => setTicket((v) => ({ ...v, confirmation: event.target.value }))} />
+          </Field>
         </div>
         <div className="action-row">
           <button className="secondary-button" type="button" onClick={() => runOrderAction('validation')} disabled={orderResult.loading}>
@@ -2005,9 +2083,9 @@ function OrdersView({ bootstrap }) {
             <Play size={16} />
             Dry-run
           </button>
-          <button className="secondary-button disabled-button" type="button" disabled>
+          <button className={routingEnabled ? 'primary-button danger-button' : 'secondary-button disabled-button'} type="button" onClick={() => runOrderAction('submit')} disabled={submitDisabled}>
             <Send size={16} />
-            Live routing disabled
+            {routingEnabled ? 'Submit to IBKR' : 'Live routing disabled'}
           </button>
         </div>
         {orderResult.error && <ErrorBlock error={orderResult.error} />}
@@ -2042,6 +2120,24 @@ function OrdersView({ bootstrap }) {
               />
             )}
           </>
+        )}
+        {orderResult.submit && (
+          <Insight>
+            <strong>Submit {orderResult.submit.submitId}</strong> · {orderResult.submit.status} — {orderResult.submit.message}
+          </Insight>
+        )}
+        {orderResult.submit?.replyId && (
+          <div className="action-row">
+            <button className="primary-button danger-button" type="button" onClick={() => runOrderAction('brokerReply')} disabled={submitDisabled}>
+              <Send size={16} />
+              Confirm broker reply
+            </button>
+          </div>
+        )}
+        {orderResult.brokerReply && (
+          <Insight>
+            Broker reply {orderResult.brokerReply.replyId}: <strong>{orderResult.brokerReply.status}</strong>
+          </Insight>
         )}
       </Panel>
 
@@ -2200,13 +2296,16 @@ function OperationsView() {
 
 function SurfaceHealthStrip({ diagnostics, validRows, maturities }) {
   const grid = diagnostics.displayGrid ?? {};
+  const coordinateCount = grid.coordinateCount ?? grid.strikeCount;
+  const commonCoordinateCount = grid.commonCoordinateCount ?? coordinateCount;
   const calendarBreaks = diagnostics.calendar?.violationCount ?? 0;
   return (
     <section className="surface-strip">
       <MetricTile label="Accepted points" value={formatNumber(diagnostics.acceptedPoints ?? validRows.length, 0)} tone="good" />
       <MetricTile label="Rejected rows" value={formatNumber(diagnostics.rejectedRows, 0)} tone={diagnostics.rejectedRows ? 'warn' : 'good'} />
       <MetricTile label="Maturities" value={formatNumber(maturities.length, 0)} />
-      <MetricTile label="Common strikes" value={formatNumber(grid.strikeCount, 0)} tone={(grid.strikeCount ?? 0) >= 5 ? 'good' : 'warn'} />
+      <MetricTile label="Grid coords" value={formatNumber(coordinateCount, 0)} tone={(coordinateCount ?? 0) >= 5 ? 'good' : 'warn'} />
+      <MetricTile label="Common domain" value={formatNumber(commonCoordinateCount, 0)} tone={(commonCoordinateCount ?? 0) >= 5 ? 'good' : 'warn'} />
       <MetricTile label="Calendar breaks" value={formatNumber(calendarBreaks, 0)} tone={calendarBreaks ? 'bad' : 'good'} />
     </section>
   );

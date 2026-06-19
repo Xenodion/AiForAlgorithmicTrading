@@ -62,6 +62,9 @@ Real order routing is disabled by default.
 
 - `/api/orders/validate` validates ticket shape and risk flags.
 - `/api/orders/dry-run` creates an audit preview without sending anything.
-- `/api/orders/submit` is intentionally blocked until routing is explicitly enabled in a future controlled release.
+- `/api/orders/submit` is blocked unless `configs/broker.yaml` has `order_routing.enabled: true`.
+- Live submission requires an account, a tradable IBKR `conid`, a server-side quantity limit, and the confirmation phrase configured under `order_routing.confirmation_phrase`.
+- Keep `order_routing.paper_only: true` for paper trading; it blocks non-paper accounts.
+- Every submit attempt is appended to `order_routing.audit_path`.
 
-Do not enable live routing without adding account selection, permissions, size limits, cancel/replace audit logs, and a paper-trading acceptance test.
+Do not enable live routing for a real account without a separate acceptance test and explicit risk approval.

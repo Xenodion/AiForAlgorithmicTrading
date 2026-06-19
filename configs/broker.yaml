@@ -4,16 +4,28 @@
 # Setup:
 #   1. Download Client Portal Gateway from ibkr.com
 #   2. Run:  bin\run.bat root\conf.yaml   (Windows)
-#   3. Open https://localhost:5000 in browser and log in once
+#   3. Open https://localhost:5050 in browser and log in once
 #   4. Keep the gateway process running while using this project
 
 connection:
-  base_url: "https://localhost:5000/v1/api"
+  base_url: "https://localhost:5050/v1/api"
   verify_ssl: false       # Gateway uses a self-signed cert — safe to disable locally
   timeout_seconds: 10
 
 session:
   tickle_interval_seconds: 60   # Ping the gateway to keep the session alive
+
+order_routing:
+  enabled: true                  # Set true only after logging into IBKR paper trading
+  paper_only: true               # Blocks non-paper accounts unless explicitly changed
+  max_quantity: 10
+  allowed_order_types:
+    - LIMIT
+    - MARKET
+  allowed_tifs:
+    - DAY
+  confirmation_phrase: "SEND ORDER"
+  audit_path: "data/audit/orders.jsonl"
 
 market_data:
   snapshot_cadence_seconds: 5
