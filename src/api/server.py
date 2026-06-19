@@ -378,11 +378,19 @@ def _option_rows(rt: Runtime, notional: float = 10) -> list[dict[str, Any]]:
     df = _apply_quote_qc(df, spot_price)
     df["Reference Spot"] = spot_price
     df["Reference Rate"] = 0.03
-    for greek in ["Delta", "Gamma", "Vega", "Theta"]:
+    for greek in ["Delta", "Vega", "Theta"]:
         if greek in df.columns:
             df[f"{greek} (€)"] = df[greek].apply(
                 lambda v: round(v * notional, 4) if v is not None and pd.notna(v) else None
             )
+    if "Gamma" in df.columns:
+        # Euro/dollar gamma = Γ · S² · multiplier / 100 (€ P&L per 1% spot
+        # move²). Raw index gamma is ~0.001 and unreadable; this is the figure
+        # a desk actually monitors and matches the pricer's dollar_gamma.
+        df["Gamma (€)"] = df["Gamma"].apply(
+            lambda v: round(v * spot_price ** 2 * notional / 100, 2)
+            if v is not None and pd.notna(v) else None
+        )
     if "Vega" in df.columns:
         def _rtv(row: pd.Series) -> float | None:
             v = row.get("Vega")

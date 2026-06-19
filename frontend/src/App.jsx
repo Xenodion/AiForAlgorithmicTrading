@@ -1124,7 +1124,7 @@ const optionColumns = [
   { key: 'Mid', format: (value) => formatNumber(value) },
   { key: 'Spread', format: (value) => formatNumber(value) },
   { key: 'Gamma', format: (value) => formatNumber(value, 6) },
-  { key: 'Gamma (€)', format: (value) => formatNumber(value, 4) },
+  { key: 'Gamma (€)', label: '€ Gamma /1%²', format: (value) => formatNumber(value, 2) },
   { key: 'Vega', format: (value) => formatNumber(value, 4) },
   { key: 'Vega (€)', format: (value) => formatNumber(value, 4) },
   { key: 'Root Time Vega', format: (value) => formatNumber(value, 4) },
@@ -1320,6 +1320,7 @@ function RiskView({ bootstrap }) {
   const [pnlInputs, setPnlInputs] = useState({ dS: 0, volMovePct: 0, days: 1 });
   const [backtestPeriod, setBacktestPeriod] = useState('3m');
   const [backtest, setBacktest] = useState({ data: null, loading: false, error: null });
+  const [portScenario, setPortScenario] = useState({ data: null, loading: false, error: null });
   const savedStrategies = useResource(() => apiGet('/api/risk/strategies'), [], true);
   const [activeStrategyId, setActiveStrategyId] = useState(null);
   const [strategyName, setStrategyName] = useState('My strategy');
@@ -1426,6 +1427,7 @@ function RiskView({ bootstrap }) {
       setStrategyDescription(strategy.description ?? '');
       setStrategyAction({ loading: false, error: null, message: 'Strategy loaded.' });
       runBacktest(strategy.positions ?? []);
+      runPortfolioScenario(strategy.positions ?? []);
     } catch (error) {
       setStrategyAction({ loading: false, error, message: null });
     }
@@ -1451,6 +1453,7 @@ function RiskView({ bootstrap }) {
     setStrategyName('My strategy');
     setStrategyDescription('');
     setBacktest({ data: null, loading: false, error: null });
+    setPortScenario({ data: null, loading: false, error: null });
     setStrategyAction({ loading: false, error: null, message: 'Simulation cleared.' });
   };
 
@@ -1486,6 +1489,21 @@ function RiskView({ bootstrap }) {
       setBacktest({ data, loading: false, error: null });
     } catch (error) {
       setBacktest({ data: null, loading: false, error });
+    }
+  };
+
+  const runPortfolioScenario = async (positionsInput) => {
+    const positions = positionsInput ?? portfolio.map((item) => item.input);
+    if (!positions.length) return;
+    setPortScenario({ data: null, loading: true, error: null });
+    try {
+      const data = await apiPost('/api/risk/scenarios', {
+        positions,
+        spot_value: Number(form.spot),
+      });
+      setPortScenario({ data, loading: false, error: null });
+    } catch (error) {
+      setPortScenario({ data: null, loading: false, error });
     }
   };
 
@@ -1665,6 +1683,41 @@ function RiskView({ bootstrap }) {
             </div>
             {backtest.error && <ErrorBlock error={backtest.error} />}
             {backtest.loading ? <LoadingBlock label="Running backtest" /> : <BacktestChart data={backtest.data} />}
+          </>
+        )}
+      </Panel>
+
+      <Panel
+        title="Portfolio scenario grid"
+        icon={BarChart3}
+        action={
+          <button className="secondary-button" type="button" disabled={!portfolio.length || portScenario.loading} onClick={() => runPortfolioScenario()}>
+            <Play size={16} />
+            Re-run
+          </button>
+        }
+      >
+        {portfolio.length === 0 ? (
+          <div className="table-empty">Load or build a portfolio above — the spot × vol grid runs automatically on load.</div>
+        ) : (
+          <>
+            <Insight>
+              Full repricing of <strong>{strategyName}</strong> · {portfolio.length} position{portfolio.length !== 1 ? 's' : ''} under spot × vol shocks
+            </Insight>
+            {portScenario.error && <ErrorBlock error={portScenario.error} />}
+            {portScenario.loading && !portScenario.data ? (
+              <LoadingBlock label="Running portfolio scenarios" />
+            ) : (
+              <>
+                <ScenarioMatrix rows={portScenario.data?.rows ?? []} />
+                {portScenario.data?.summary && (
+                  <div className="metric-grid two">
+                    <MetricTile label="Worst case (full reprice)" value={formatEuro(portScenario.data.summary.worst?.['P&L (full)'])} tone="bad" />
+                    <MetricTile label="Best case (full reprice)" value={formatEuro(portScenario.data.summary.best?.['P&L (full)'])} tone="good" />
+                  </div>
+                )}
+              </>
+            )}
           </>
         )}
       </Panel>
